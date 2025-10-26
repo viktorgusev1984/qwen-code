@@ -39,6 +39,7 @@ vi.mock('tiktoken', () => ({
 import { OpenAIContentGenerator } from './openaiContentGenerator.js';
 import type { Config } from '../../config/config.js';
 import { AuthType } from '../contentGenerator.js';
+import type { ContentGeneratorConfig } from '../contentGenerator.js';
 import type {
   GenerateContentParameters,
   CountTokensParameters,
@@ -129,6 +130,63 @@ describe('OpenAIContentGenerator (Refactored)', () => {
     it('should delegate to pipeline.executeStream', async () => {
       // This test verifies the method exists and can be called
       expect(typeof generator.generateContentStream).toBe('function');
+    });
+
+    it('should use synchronous execution when forceSynchronous is true', async () => {
+      const contentGeneratorConfig = {
+        model: 'gpt-4',
+        apiKey: 'test-key',
+        authType: AuthType.USE_OPENAI,
+        enableOpenAILogging: false,
+        timeout: 120000,
+        maxRetries: 3,
+        forceSynchronous: true,
+      } satisfies ContentGeneratorConfig;
+
+      const mockProvider: OpenAICompatibleProvider = {
+        buildHeaders: vi.fn().mockReturnValue({}),
+        buildClient: vi.fn().mockReturnValue({
+          chat: {
+            completions: {
+              create: vi.fn(),
+            },
+          },
+          embeddings: {
+            create: vi.fn(),
+          },
+        } as unknown as OpenAI),
+        buildRequest: vi.fn().mockImplementation((req) => req),
+      };
+
+      const syncGenerator = new OpenAIContentGenerator(
+        contentGeneratorConfig,
+        mockConfig,
+        mockProvider,
+      );
+
+      const executeSpy = vi
+        .spyOn(syncGenerator['pipeline'], 'execute')
+        .mockResolvedValue({
+          candidates: [],
+        } as unknown as GenerateContentResponse);
+      const executeStreamSpy = vi.spyOn(
+        syncGenerator['pipeline'],
+        'executeStream',
+      );
+
+      const stream = await syncGenerator.generateContentStream(
+        { model: 'gpt-4', contents: [] },
+        'prompt-id',
+      );
+
+      const chunks: GenerateContentResponse[] = [];
+      for await (const chunk of stream) {
+        chunks.push(chunk);
+      }
+
+      expect(executeSpy).toHaveBeenCalledTimes(1);
+      expect(executeStreamSpy).not.toHaveBeenCalled();
+      expect(chunks).toHaveLength(1);
     });
   });
 

@@ -18,12 +18,14 @@ import type { ContentGeneratorConfig } from '../contentGenerator.js';
 
 export class OpenAIContentGenerator implements ContentGenerator {
   protected pipeline: ContentGenerationPipeline;
+  protected readonly contentGeneratorConfig: ContentGeneratorConfig;
 
   constructor(
     contentGeneratorConfig: ContentGeneratorConfig,
     cliConfig: Config,
     provider: OpenAICompatibleProvider,
   ) {
+    this.contentGeneratorConfig = contentGeneratorConfig;
     // Create pipeline configuration
     const pipelineConfig: PipelineConfig = {
       cliConfig,
@@ -66,6 +68,13 @@ export class OpenAIContentGenerator implements ContentGenerator {
     request: GenerateContentParameters,
     userPromptId: string,
   ): Promise<AsyncGenerator<GenerateContentResponse>> {
+    if (this.contentGeneratorConfig.forceSynchronous) {
+      const self = this;
+      return (async function* () {
+        const response = await self.generateContent(request, userPromptId);
+        yield response;
+      })();
+    }
     return this.pipeline.executeStream(request, userPromptId);
   }
 
