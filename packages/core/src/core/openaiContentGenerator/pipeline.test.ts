@@ -1189,6 +1189,12 @@ describe('ContentGenerationPipeline', () => {
       mockContentGeneratorConfig.forceSynchronous = true;
       pipeline = new ContentGenerationPipeline(mockConfig);
 
+      (mockProvider.buildRequest as Mock).mockImplementationOnce((req) => ({
+        ...req,
+        stream: true,
+        stream_options: { include_usage: true },
+      }));
+
       const request: GenerateContentParameters = {
         model: 'test-model',
         contents: [{ parts: [{ text: 'Hello' }], role: 'user' }],
@@ -1237,6 +1243,10 @@ describe('ContentGenerationPipeline', () => {
       expect(mockClient.chat.completions.create).toHaveBeenCalledWith(
         expect.not.objectContaining({ stream: true }),
         expect.objectContaining({ signal: undefined }),
+      );
+      expect(mockClient.chat.completions.create).toHaveBeenCalledWith(
+        expect.not.objectContaining({ stream_options: expect.anything() }),
+        expect.anything(),
       );
       expect(mockConverter.convertOpenAIResponseToGemini).toHaveBeenCalledWith(
         mockOpenAIResponse,

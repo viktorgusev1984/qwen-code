@@ -358,8 +358,12 @@ export class ContentGenerationPipeline {
         userPromptId,
         isStreaming,
       );
+      const sanitizedRequest = this.sanitizeStreamingProperties(
+        openaiRequest,
+        isStreaming,
+      );
 
-      const result = await executor(openaiRequest, context);
+      const result = await executor(sanitizedRequest, context);
 
       context.duration = Date.now() - context.startTime;
       return result;
@@ -397,6 +401,10 @@ export class ContentGenerationPipeline {
           userPromptId,
           isStreaming,
         );
+        openaiRequest = this.sanitizeStreamingProperties(
+          openaiRequest,
+          Boolean(isStreaming),
+        );
       } else {
         // For processStreamWithLogging, we don't have userPromptId/isStreaming,
         // so create a minimal request
@@ -413,8 +421,38 @@ export class ContentGenerationPipeline {
       };
     }
 
+    openaiRequest = this.sanitizeStreamingProperties(
+      openaiRequest,
+      Boolean(isStreaming),
+    );
+
     await this.config.telemetryService.logError(context, error, openaiRequest);
     this.config.errorHandler.handle(error, context, request);
+  }
+
+  private sanitizeStreamingProperties(
+    request: OpenAI.Chat.ChatCompletionCreateParams,
+    isStreaming: boolean,
+  ): OpenAI.Chat.ChatCompletionCreateParams {
+    if (isStreaming) {
+      return request;
+    }
+
+    if (!('stream' in request) && !('stream_options' in request)) {
+      return request;
+    }
+
+    const sanitizedRequest = {
+      ...request,
+    } as OpenAI.Chat.ChatCompletionCreateParams & {
+      stream?: boolean;
+      stream_options?: OpenAI.Chat.ChatCompletionCreateParamsStreaming['stream_options'];
+    };
+
+    delete sanitizedRequest.stream;
+    delete sanitizedRequest.stream_options;
+
+    return sanitizedRequest;
   }
 
   /**

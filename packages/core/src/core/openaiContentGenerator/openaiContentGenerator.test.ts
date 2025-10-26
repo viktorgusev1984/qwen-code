@@ -214,6 +214,9 @@ describe('OpenAIContentGenerator (Refactored)', () => {
       expect(createMock).toHaveBeenCalledTimes(1);
       const requestArg = createMock.mock.calls[0]?.[0] ?? {};
       expect('stream' in (requestArg as Record<string, unknown>)).toBe(false);
+      expect('stream_options' in (requestArg as Record<string, unknown>)).toBe(
+        false,
+      );
       expect(convertSpy).toHaveBeenCalledWith(mockOpenAIResponse);
       expect(logSuccessSpy).toHaveBeenCalled();
       expect(chunks).toEqual([geminiResponse]);
