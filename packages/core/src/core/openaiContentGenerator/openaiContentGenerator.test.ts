@@ -132,7 +132,7 @@ describe('OpenAIContentGenerator (Refactored)', () => {
       expect(typeof generator.generateContentStream).toBe('function');
     });
 
-    it('should use synchronous execution when forceSynchronous is true', async () => {
+    it('should request non-streaming completions when forceSynchronous is true', async () => {
       const contentGeneratorConfig = {
         model: 'gpt-4',
         apiKey: 'test-key',
@@ -143,12 +143,28 @@ describe('OpenAIContentGenerator (Refactored)', () => {
         forceSynchronous: true,
       } satisfies ContentGeneratorConfig;
 
+      const mockOpenAIResponse = {
+        id: 'cmpl-test',
+        object: 'chat.completion',
+        created: Date.now(),
+        model: 'gpt-4',
+        choices: [
+          {
+            index: 0,
+            finish_reason: 'stop',
+            message: { role: 'assistant', content: 'Hello' },
+          },
+        ],
+      } as unknown as OpenAI.Chat.ChatCompletion;
+
+      const createMock = vi.fn().mockResolvedValue(mockOpenAIResponse);
+
       const mockProvider: OpenAICompatibleProvider = {
         buildHeaders: vi.fn().mockReturnValue({}),
         buildClient: vi.fn().mockReturnValue({
           chat: {
             completions: {
-              create: vi.fn(),
+              create: createMock,
             },
           },
           embeddings: {
@@ -164,15 +180,26 @@ describe('OpenAIContentGenerator (Refactored)', () => {
         mockProvider,
       );
 
-      const executeSpy = vi
-        .spyOn(syncGenerator['pipeline'], 'execute')
-        .mockResolvedValue({
-          candidates: [],
-        } as unknown as GenerateContentResponse);
-      const executeStreamSpy = vi.spyOn(
-        syncGenerator['pipeline'],
-        'executeStream',
-      );
+      const pipeline = syncGenerator['pipeline'];
+
+      const geminiResponse = {
+        candidates: [
+          {
+            content: {
+              role: 'model',
+              parts: [{ text: 'Hello' }],
+            },
+            finishReason: 'STOP',
+          },
+        ],
+      } as GenerateContentResponse;
+
+      const convertSpy = vi
+        .spyOn(pipeline['converter'], 'convertOpenAIResponseToGemini')
+        .mockReturnValue(geminiResponse);
+      const logStreamingSuccessSpy = vi
+        .spyOn(pipeline['config'].telemetryService, 'logStreamingSuccess')
+        .mockResolvedValue();
 
       const stream = await syncGenerator.generateContentStream(
         { model: 'gpt-4', contents: [] },
@@ -184,9 +211,12 @@ describe('OpenAIContentGenerator (Refactored)', () => {
         chunks.push(chunk);
       }
 
-      expect(executeSpy).toHaveBeenCalledTimes(1);
-      expect(executeStreamSpy).not.toHaveBeenCalled();
-      expect(chunks).toHaveLength(1);
+      expect(createMock).toHaveBeenCalledTimes(1);
+      const requestArg = createMock.mock.calls[0]?.[0] ?? {};
+      expect('stream' in (requestArg as Record<string, unknown>)).toBe(false);
+      expect(convertSpy).toHaveBeenCalledWith(mockOpenAIResponse);
+      expect(logStreamingSuccessSpy).toHaveBeenCalled();
+      expect(chunks).toEqual([geminiResponse]);
     });
   });
 

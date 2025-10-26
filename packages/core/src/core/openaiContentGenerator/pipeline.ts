@@ -73,6 +73,10 @@ export class ContentGenerationPipeline {
     request: GenerateContentParameters,
     userPromptId: string,
   ): Promise<AsyncGenerator<GenerateContentResponse>> {
+    if (this.contentGeneratorConfig.forceSynchronous) {
+      return this.executeSynchronousStream(request, userPromptId);
+    }
+
     return this.executeWithErrorHandling(
       request,
       userPromptId,
@@ -95,6 +99,40 @@ export class ContentGenerationPipeline {
         );
       },
     );
+  }
+
+  private async executeSynchronousStream(
+    request: GenerateContentParameters,
+    userPromptId: string,
+  ): Promise<AsyncGenerator<GenerateContentResponse>> {
+    const context = this.createRequestContext(userPromptId, true);
+
+    try {
+      const openaiRequest = await this.buildRequest(request, userPromptId, false);
+      const openaiResponse = (await this.client.chat.completions.create(
+        openaiRequest,
+        {
+          signal: request.config?.abortSignal,
+        },
+      )) as OpenAI.Chat.ChatCompletion;
+
+      const geminiResponse =
+        this.converter.convertOpenAIResponseToGemini(openaiResponse);
+
+      context.duration = Date.now() - context.startTime;
+
+      await this.config.telemetryService.logStreamingSuccess(
+        context,
+        [geminiResponse],
+        openaiRequest,
+      );
+
+      return (async function* () {
+        yield geminiResponse;
+      })();
+    } catch (error) {
+      await this.handleError(error, context, request, userPromptId, false);
+    }
   }
 
   /**

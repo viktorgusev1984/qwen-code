@@ -68,13 +68,6 @@ export class OpenAIContentGenerator implements ContentGenerator {
     request: GenerateContentParameters,
     userPromptId: string,
   ): Promise<AsyncGenerator<GenerateContentResponse>> {
-    if (this.contentGeneratorConfig.forceSynchronous) {
-      const self = this;
-      return (async function* () {
-        const response = await self.generateContent(request, userPromptId);
-        yield response;
-      })();
-    }
     return this.pipeline.executeStream(request, userPromptId);
   }
 

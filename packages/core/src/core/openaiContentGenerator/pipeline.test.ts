@@ -1184,6 +1184,77 @@ describe('ContentGenerationPipeline', () => {
       );
     });
 
+    it('should fall back to synchronous completion when streaming is forced off', async () => {
+      // Arrange
+      mockContentGeneratorConfig.forceSynchronous = true;
+      pipeline = new ContentGenerationPipeline(mockConfig);
+
+      const request: GenerateContentParameters = {
+        model: 'test-model',
+        contents: [{ parts: [{ text: 'Hello' }], role: 'user' }],
+      };
+      const userPromptId = 'test-prompt-id';
+
+      const mockMessages = [
+        { role: 'user', content: 'Hello' },
+      ] as OpenAI.Chat.ChatCompletionMessageParam[];
+
+      const mockOpenAIResponse = {
+        id: 'response-id',
+        choices: [
+          { message: { content: 'Hello response' }, finish_reason: 'stop' },
+        ],
+        created: Date.now(),
+        model: 'test-model',
+      } as OpenAI.Chat.ChatCompletion;
+
+      const mockGeminiResponse = new GenerateContentResponse();
+      mockGeminiResponse.candidates = [
+        { content: { parts: [{ text: 'Hello response' }], role: 'model' } },
+      ];
+
+      (mockConverter.convertGeminiRequestToOpenAI as Mock).mockReturnValue(
+        mockMessages,
+      );
+      (mockConverter.convertOpenAIResponseToGemini as Mock).mockReturnValue(
+        mockGeminiResponse,
+      );
+      (mockClient.chat.completions.create as Mock).mockResolvedValue(
+        mockOpenAIResponse,
+      );
+
+      // Act
+      const resultGenerator = await pipeline.executeStream(request, userPromptId);
+      const results: GenerateContentResponse[] = [];
+      for await (const result of resultGenerator) {
+        results.push(result);
+      }
+
+      // Assert
+      expect(mockConverter.convertGeminiRequestToOpenAI).toHaveBeenCalledWith(
+        request,
+      );
+      expect(mockClient.chat.completions.create).toHaveBeenCalledWith(
+        expect.not.objectContaining({ stream: true }),
+        expect.objectContaining({ signal: undefined }),
+      );
+      expect(mockConverter.convertOpenAIResponseToGemini).toHaveBeenCalledWith(
+        mockOpenAIResponse,
+      );
+      expect(mockTelemetryService.logStreamingSuccess).toHaveBeenCalledWith(
+        expect.objectContaining({
+          userPromptId,
+          isStreaming: true,
+        }),
+        [mockGeminiResponse],
+        expect.objectContaining({
+          model: 'test-model',
+          messages: mockMessages,
+        }),
+      );
+      expect(results).toEqual([mockGeminiResponse]);
+    });
+
     it('should collect all OpenAI chunks for logging even when Gemini responses are filtered', async () => {
       // Create chunks that would produce empty Gemini responses (partial tool calls)
       const partialToolCallChunk1: OpenAI.Chat.ChatCompletionChunk = {
