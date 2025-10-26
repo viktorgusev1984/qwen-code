@@ -197,8 +197,8 @@ describe('OpenAIContentGenerator (Refactored)', () => {
       const convertSpy = vi
         .spyOn(pipeline['converter'], 'convertOpenAIResponseToGemini')
         .mockReturnValue(geminiResponse);
-      const logStreamingSuccessSpy = vi
-        .spyOn(pipeline['config'].telemetryService, 'logStreamingSuccess')
+      const logSuccessSpy = vi
+        .spyOn(pipeline['config'].telemetryService, 'logSuccess')
         .mockResolvedValue();
 
       const stream = await syncGenerator.generateContentStream(
@@ -215,7 +215,7 @@ describe('OpenAIContentGenerator (Refactored)', () => {
       const requestArg = createMock.mock.calls[0]?.[0] ?? {};
       expect('stream' in (requestArg as Record<string, unknown>)).toBe(false);
       expect(convertSpy).toHaveBeenCalledWith(mockOpenAIResponse);
-      expect(logStreamingSuccessSpy).toHaveBeenCalled();
+      expect(logSuccessSpy).toHaveBeenCalled();
       expect(chunks).toEqual([geminiResponse]);
     });
   });

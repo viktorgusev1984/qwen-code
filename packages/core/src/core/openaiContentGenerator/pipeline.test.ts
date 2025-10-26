@@ -1241,17 +1241,19 @@ describe('ContentGenerationPipeline', () => {
       expect(mockConverter.convertOpenAIResponseToGemini).toHaveBeenCalledWith(
         mockOpenAIResponse,
       );
-      expect(mockTelemetryService.logStreamingSuccess).toHaveBeenCalledWith(
+      expect(mockTelemetryService.logSuccess).toHaveBeenCalledWith(
         expect.objectContaining({
           userPromptId,
-          isStreaming: true,
+          isStreaming: false,
         }),
-        [mockGeminiResponse],
+        mockGeminiResponse,
         expect.objectContaining({
           model: 'test-model',
           messages: mockMessages,
         }),
+        mockOpenAIResponse,
       );
+      expect(mockTelemetryService.logStreamingSuccess).not.toHaveBeenCalled();
       expect(results).toEqual([mockGeminiResponse]);
     });
 
