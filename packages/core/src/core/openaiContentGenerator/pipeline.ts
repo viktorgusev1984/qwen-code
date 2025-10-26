@@ -16,6 +16,16 @@ import { OpenAIContentConverter } from './converter.js';
 import type { TelemetryService, RequestContext } from './telemetryService.js';
 import type { ErrorHandler } from './errorHandler.js';
 
+function isAsyncIterable<T>(
+  value: unknown,
+): value is AsyncIterable<T> {
+  return (
+    value !== null &&
+    typeof value === 'object' &&
+    typeof (value as AsyncIterable<T>)[Symbol.asyncIterator] === 'function'
+  );
+}
+
 export interface PipelineConfig {
   cliConfig: Config;
   provider: OpenAICompatibleProvider;
@@ -85,17 +95,34 @@ export class ContentGenerationPipeline {
       userPromptId,
       true,
       async (openaiRequest, context) => {
-        // Stage 1: Create OpenAI stream
-        const stream = (await this.client.chat.completions.create(
+        const response = await this.client.chat.completions.create(
           openaiRequest,
           {
             signal: request.config?.abortSignal,
           },
-        )) as AsyncIterable<OpenAI.Chat.ChatCompletionChunk>;
+        );
+
+        if (!isAsyncIterable<OpenAI.Chat.ChatCompletionChunk>(response)) {
+          const geminiResponse =
+            this.converter.convertOpenAIResponseToGemini(
+              response as OpenAI.Chat.ChatCompletion,
+            );
+
+          await this.config.telemetryService.logSuccess(
+            context,
+            geminiResponse,
+            openaiRequest,
+            response as OpenAI.Chat.ChatCompletion,
+          );
+
+          return (async function* () {
+            yield geminiResponse;
+          })();
+        }
 
         // Stage 2: Process stream with conversion and logging
         return this.processStreamWithLogging(
-          stream,
+          response,
           context,
           openaiRequest,
           request,
