@@ -4,7 +4,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import type { Config, ToolCallRequestInfo } from '@qwen-code/qwen-code-core';
+import type {
+  Config,
+  ToolCallRequestInfo,
+  ServerGeminiStreamEvent,
+} from '@qwen-code/qwen-code-core';
 import { isSlashCommand } from './ui/utils/commandUtils.js';
 import type { LoadedSettings } from './config/settings.js';
 import {
@@ -30,6 +34,32 @@ import {
   handleCancellationError,
   handleMaxTurnsExceededError,
 } from './utils/errors.js';
+
+async function* bufferNonStreamingEvents(
+  stream: AsyncIterable<ServerGeminiStreamEvent>,
+): AsyncGenerator<ServerGeminiStreamEvent> {
+  let bufferedContent = '';
+  for await (const event of stream) {
+    if (event.type === GeminiEventType.Content) {
+      bufferedContent += event.value;
+      continue;
+    }
+    if (bufferedContent) {
+      yield {
+        type: GeminiEventType.Content,
+        value: bufferedContent,
+      } as ServerGeminiStreamEvent;
+      bufferedContent = '';
+    }
+    yield event;
+  }
+  if (bufferedContent) {
+    yield {
+      type: GeminiEventType.Content,
+      value: bufferedContent,
+    } as ServerGeminiStreamEvent;
+  }
+}
 
 export async function runNonInteractive(
   config: Config,
@@ -107,11 +137,20 @@ export async function runNonInteractive(
         }
         const toolCallRequests: ToolCallRequestInfo[] = [];
 
-        const responseStream = geminiClient.sendMessageStream(
-          currentMessages[0]?.parts || [],
-          abortController.signal,
-          prompt_id,
-        );
+        const shouldStream = config.shouldStreamResponses();
+        const responseStream = shouldStream
+          ? geminiClient.sendMessageStream(
+              currentMessages[0]?.parts || [],
+              abortController.signal,
+              prompt_id,
+            )
+          : bufferNonStreamingEvents(
+              geminiClient.sendMessageSync(
+                currentMessages[0]?.parts || [],
+                abortController.signal,
+                prompt_id,
+              ),
+            );
 
         let responseText = '';
         for await (const event of responseStream) {

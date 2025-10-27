@@ -180,6 +180,18 @@ describe('Server Config (config.ts)', () => {
     usageStatisticsEnabled: false,
   };
 
+  it('streams responses by default', () => {
+    const config = new Config(baseParams);
+    expect(config.getStreamingMode()).toBe('stream');
+    expect(config.shouldStreamResponses()).toBe(true);
+  });
+
+  it('respects a synchronous streamingMode override', () => {
+    const config = new Config({ ...baseParams, streamingMode: 'sync' });
+    expect(config.getStreamingMode()).toBe('sync');
+    expect(config.shouldStreamResponses()).toBe(false);
+  });
+
   beforeEach(() => {
     // Reset mocks if necessary
     vi.clearAllMocks();

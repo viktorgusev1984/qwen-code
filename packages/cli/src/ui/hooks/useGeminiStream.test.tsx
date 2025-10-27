@@ -42,6 +42,9 @@ import type { LoadedSettings } from '../../config/settings.js';
 const mockSendMessageStream = vi
   .fn()
   .mockReturnValue((async function* () {})());
+const mockSendMessageSync = vi
+  .fn()
+  .mockReturnValue((async function* () {})());
 const mockStartChat = vi.fn();
 
 const MockedGeminiClientClass = vi.hoisted(() =>
@@ -49,6 +52,7 @@ const MockedGeminiClientClass = vi.hoisted(() =>
     // _config
     this.startChat = mockStartChat;
     this.sendMessageStream = mockSendMessageStream;
+    this.sendMessageSync = mockSendMessageSync;
     this.addHistory = vi.fn();
     this.getChatRecordingService = vi.fn().mockReturnValue({
       recordThought: vi.fn(),
@@ -227,6 +231,8 @@ describe('useGeminiStream', () => {
       setQuotaErrorOccurred: vi.fn(),
       getQuotaErrorOccurred: vi.fn(() => false),
       getModel: vi.fn(() => 'gemini-2.5-pro'),
+      shouldStreamResponses: vi.fn(() => true),
+      getStreamingMode: vi.fn(() => 'stream'),
       getContentGeneratorConfig: vi
         .fn()
         .mockReturnValue(contentGeneratorConfig),
@@ -255,6 +261,9 @@ describe('useGeminiStream', () => {
       sendMessageStream: mockSendMessageStream,
     } as unknown as any); // GeminiChat -> any
     mockSendMessageStream
+      .mockClear()
+      .mockReturnValue((async function* () {})());
+    mockSendMessageSync
       .mockClear()
       .mockReturnValue((async function* () {})());
     handleAtCommandSpy = vi.spyOn(atCommandProcessor, 'handleAtCommand');
@@ -2436,6 +2445,47 @@ describe('useGeminiStream', () => {
         'gemini-2.5-pro',
         'gemini-2.5-flash',
       );
+    });
+  });
+
+  describe('Non-streaming completions', () => {
+    it('uses synchronous completions when streaming is disabled', async () => {
+      mockConfig.shouldStreamResponses = vi.fn(() => false);
+      const syncStream = (async function* () {
+        yield {
+          type: ServerGeminiEventType.Content,
+          value: 'Buffered reply',
+        } as GeminiEvent;
+        yield {
+          type: ServerGeminiEventType.Finished,
+          value: { reason: 'stop', usageMetadata: undefined },
+        } as ServerGeminiFinishedEvent;
+      })();
+      mockSendMessageSync.mockReturnValue(syncStream);
+
+      const { result } = renderTestHook();
+
+      await act(async () => {
+        await result.current.submitQuery('Test query');
+      });
+
+      expect(mockSendMessageSync).toHaveBeenCalledWith(
+        'Test query',
+        expect.any(AbortSignal),
+        expect.any(String),
+      );
+      expect(mockSendMessageStream).not.toHaveBeenCalled();
+
+      await waitFor(() => {
+        expect(
+          mockAddItem.mock.calls.some(
+            ([item]) =>
+              item.type === 'gemini' &&
+              typeof item.text === 'string' &&
+              item.text.includes('Buffered reply'),
+          ),
+        ).toBe(true);
+      });
     });
   });
 

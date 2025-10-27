@@ -64,6 +64,16 @@ Read from files and process with Qwen Code:
 cat README.md | qwen --prompt "Summarize this documentation"
 ```
 
+### Synchronous Completions
+
+By default the CLI streams responses as they are generated. To wait for a single, fully buffered reply instead, pass `--streaming-mode sync`:
+
+```bash
+qwen --streaming-mode sync --prompt "Generate a summary without streaming chunks"
+```
+
+You can also make this the default by setting `"model.streamingMode": "sync"` in your `.qwen/settings.json` file.
+
 ## Output Formats
 
 ### Text Output (Default)

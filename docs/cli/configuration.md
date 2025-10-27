@@ -151,6 +151,10 @@ Settings are organized into categories. All settings should be placed within the
   - **Description:** The Qwen model to use for conversations.
   - **Default:** `undefined`
 
+- **`model.streamingMode`** (`"stream"` | `"sync"`):
+  - **Description:** Controls how responses are delivered. Use `"stream"` to receive incremental updates (default) or `"sync"` to wait until the completion is ready before displaying anything.
+  - **Default:** `"stream"`
+
 - **`model.maxSessionTurns`** (number):
   - **Description:** Maximum number of user/model/tool turns to keep in a session. -1 means unlimited.
   - **Default:** `-1`

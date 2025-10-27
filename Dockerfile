@@ -1,5 +1,14 @@
 # Build stage
-FROM docker.io/library/node:20-slim AS builder
+FROM docker-hosted.artifactory.tcsbank.ru/cicd-images/nodejs-22 AS builder
+
+ARG UBUNTU_VER=jammy
+
+RUN echo "deb [trusted=yes] http://apt-proxy.tcsbank.ru/repository/apt-ubuntu/ ${UBUNTU_VER} main restricted universe multiverse" > /etc/apt/sources.list && \
+    echo "deb [trusted=yes] http://apt-proxy.tcsbank.ru/repository/apt-ubuntu/ ${UBUNTU_VER}-updates main restricted universe multiverse" >> /etc/apt/sources.list && \
+    echo "deb [trusted=yes] http://apt-proxy.tcsbank.ru/repository/apt-ubuntu/ ${UBUNTU_VER}-backports main restricted universe multiverse" >> /etc/apt/sources.list && \
+    echo "deb [trusted=yes] http://apt-proxy.tcsbank.ru/repository/apt-ubuntu/ ${UBUNTU_VER}-security main restricted universe multiverse" >> /etc/apt/sources.list
+ADD https://nexus.tcsbank.ru/repository/dist/tinkoff-root-certs/tinkoff-bundle.crt /usr/local/share/ca-certificates/
+RUN update-ca-certificates
 
 # Install build dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -20,13 +29,16 @@ COPY . /home/node/app
 WORKDIR /home/node/app
 
 # Install dependencies and build packages
-RUN npm ci \
+RUN npm config set registry "https://artifactory.tcsbank.ru/artifactory/api/npm/npm-all/" \
+  && npm config set strict-ssl false \
+  && npm config set ca "" \
+  && npm ci \
   && npm run build --workspaces \
   && npm pack -w @qwen-code/qwen-code --pack-destination ./packages/cli/dist \
   && npm pack -w @qwen-code/qwen-code-core --pack-destination ./packages/core/dist
 
 # Runtime stage
-FROM docker.io/library/node:20-slim
+FROM docker-hosted.artifactory.tcsbank.ru/cicd-images/nodejs-22
 
 ARG SANDBOX_NAME="qwen-code-sandbox"
 ARG CLI_VERSION_ARG
@@ -65,9 +77,12 @@ COPY --from=builder /home/node/app/packages/cli/dist/*.tgz /tmp/
 COPY --from=builder /home/node/app/packages/core/dist/*.tgz /tmp/
 
 # Install built packages globally
-RUN npm install -g /tmp/*.tgz \
-  && npm cache clean --force \
-  && rm -rf /tmp/*.tgz
+RUN npm config set registry "https://artifactory.tcsbank.ru/artifactory/api/npm/npm-all/" \
+ && npm config set strict-ssl false \
+ && npm config set ca "" \
+ && npm install -g /tmp/*.tgz \
+ && npm cache clean --force \
+ && rm -rf /tmp/*.tgz
 
 # Default entrypoint when none specified
 CMD ["qwen"]

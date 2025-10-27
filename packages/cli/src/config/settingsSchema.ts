@@ -492,6 +492,20 @@ const SETTINGS_SCHEMA = {
         description: 'The Gemini model to use for conversations.',
         showInDialog: false,
       },
+      streamingMode: {
+        type: 'string',
+        label: 'Response Mode',
+        category: 'Model',
+        requiresRestart: false,
+        default: 'stream' as 'stream' | 'sync',
+        description:
+          'Select whether responses stream incrementally or arrive as a single completion.',
+        showInDialog: true,
+        options: [
+          { label: 'Streaming (default)', value: 'stream' },
+          { label: 'Synchronous', value: 'sync' },
+        ],
+      },
       maxSessionTurns: {
         type: 'number',
         label: 'Max Session Turns',

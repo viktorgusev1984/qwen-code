@@ -477,7 +477,7 @@ export class GeminiClient {
     );
   }
 
-  async *sendMessage(
+  async *sendMessageSync(
     request: PartListUnion,
     signal: AbortSignal,
     prompt_id: string,
@@ -490,6 +490,15 @@ export class GeminiClient {
       prompt_id,
       turns,
     );
+  }
+
+  async *sendMessage(
+    request: PartListUnion,
+    signal: AbortSignal,
+    prompt_id: string,
+    turns: number = MAX_TURNS,
+  ): AsyncGenerator<ServerGeminiStreamEvent, Turn> {
+    return yield* this.sendMessageSync(request, signal, prompt_id, turns);
   }
 
   private async *sendMessageInternal(
