@@ -77,6 +77,39 @@ const INVALID_CONTENT_RETRY_OPTIONS: ContentRetryOptions = {
   maxAttempts: 2, // 1 initial call + 1 retry
   initialDelayMs: 500,
 };
+
+function shouldRetryOnTransientError(error: unknown): boolean {
+  if (error instanceof ApiError && error.message) {
+    if (error.status === 400) return false;
+    if (isSchemaDepthError(error.message)) return false;
+    if (error.status === 429) return true;
+    if (error.status >= 500 && error.status < 600) return true;
+  }
+
+  if (error instanceof Error && error.message) {
+    const normalizedMessage = error.message.toLowerCase();
+    if (normalizedMessage.includes('connection error')) {
+      return true;
+    }
+    if (normalizedMessage.includes('connection timed out')) {
+      return true;
+    }
+    if (normalizedMessage.includes('socket hang up')) {
+      return true;
+    }
+    if (normalizedMessage.includes('econnreset')) {
+      return true;
+    }
+    if (normalizedMessage.includes('fetch failed')) {
+      return true;
+    }
+    if (normalizedMessage.includes('network error')) {
+      return true;
+    }
+  }
+
+  return false;
+}
 /**
  * Returns true if the response is valid, false otherwise.
  *
@@ -508,15 +541,7 @@ export class GeminiChat {
     ) => await handleFallback(this.config, model, authType, error);
 
     const streamResponse = await retryWithBackoff(apiCall, {
-      shouldRetryOnError: (error: unknown) => {
-        if (error instanceof ApiError && error.message) {
-          if (error.status === 400) return false;
-          if (isSchemaDepthError(error.message)) return false;
-          if (error.status === 429) return true;
-          if (error.status >= 500 && error.status < 600) return true;
-        }
-        return false;
-      },
+      shouldRetryOnError: (error) => shouldRetryOnTransientError(error),
       onPersistent429: onPersistent429Callback,
       authType: this.config.getContentGeneratorConfig()?.authType,
     });
@@ -561,15 +586,7 @@ export class GeminiChat {
     ) => await handleFallback(this.config, model, authType, error);
 
     return retryWithBackoff(apiCall, {
-      shouldRetryOnError: (error: unknown) => {
-        if (error instanceof ApiError && error.message) {
-          if (error.status === 400) return false;
-          if (isSchemaDepthError(error.message)) return false;
-          if (error.status === 429) return true;
-          if (error.status >= 500 && error.status < 600) return true;
-        }
-        return false;
-      },
+      shouldRetryOnError: (error) => shouldRetryOnTransientError(error),
       onPersistent429: onPersistent429Callback,
       authType: this.config.getContentGeneratorConfig()?.authType,
     });
