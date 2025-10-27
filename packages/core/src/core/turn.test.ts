@@ -77,8 +77,9 @@ describe('Turn', () => {
     mockGetHistory.mockReturnValue([]);
     mockSendMessageStream.mockResolvedValue((async function* () {})());
     mockSendMessage.mockResolvedValue({
+      text: '',
       candidates: [],
-    } as GenerateContentResponse);
+    } as unknown as GenerateContentResponse);
     mockDrainPendingSyncStreamEvents.mockReturnValue([]);
   });
 
