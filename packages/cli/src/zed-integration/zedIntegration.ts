@@ -12,6 +12,7 @@ import type {
   GeminiChat,
   ToolCallConfirmationDetails,
   ToolResult,
+  StreamEvent,
 } from '@qwen-code/qwen-code-core';
 import {
   AuthType,
@@ -260,6 +261,7 @@ class Session {
     const parts = await this.#resolvePrompt(params.prompt, pendingSend.signal);
 
     let nextMessage: Content | null = { role: 'user', parts };
+    const shouldStreamResponses = this.config.shouldStreamResponses();
 
     while (nextMessage !== null) {
       if (pendingSend.signal.aborted) {
@@ -268,19 +270,48 @@ class Session {
       }
 
       const functionCalls: FunctionCall[] = [];
+      const modelName = resolveModel(
+        this.config.getModel(),
+        this.config.isInFallbackMode(),
+      );
+      const request = {
+        message: nextMessage?.parts ?? [],
+        config: {
+          abortSignal: pendingSend.signal,
+        },
+      } as const;
 
       try {
-        const responseStream = await chat.sendMessageStream(
-          resolveModel(this.config.getModel(), this.config.isInFallbackMode()),
-          {
-            message: nextMessage?.parts ?? [],
-            config: {
-              abortSignal: pendingSend.signal,
-            },
-          },
-          promptId,
-        );
+        let responseStream: AsyncIterable<StreamEvent>;
+        if (shouldStreamResponses) {
+          responseStream = await chat.sendMessageStream(
+            modelName,
+            request,
+            promptId,
+          );
+        } else {
+          const response = await chat.sendMessage(modelName, request, promptId);
+          const pendingEvents = chat.drainPendingSyncStreamEvents();
+          responseStream = (async function* () {
+            for (const event of pendingEvents) {
+              yield event;
+            }
+            yield {
+              type: StreamEventType.CHUNK,
+              value: response,
+            } as StreamEvent;
+          })();
+        }
         nextMessage = null;
+
+        const queuedUpdates: acp.SessionUpdate[] = [];
+        const sendOrQueueUpdate = (update: acp.SessionUpdate) => {
+          if (shouldStreamResponses) {
+            void this.sendUpdate(update);
+          } else {
+            queuedUpdates.push(update);
+          }
+        };
 
         for await (const resp of responseStream) {
           if (pendingSend.signal.aborted) {
@@ -303,7 +334,7 @@ class Session {
                 text: part.text,
               };
 
-              this.sendUpdate({
+              sendOrQueueUpdate({
                 sessionUpdate: part.thought
                   ? 'agent_thought_chunk'
                   : 'agent_message_chunk',
@@ -314,6 +345,12 @@ class Session {
 
           if (resp.type === StreamEventType.CHUNK && resp.value.functionCalls) {
             functionCalls.push(...resp.value.functionCalls);
+          }
+        }
+
+        if (!shouldStreamResponses) {
+          for (const update of queuedUpdates) {
+            await this.sendUpdate(update);
           }
         }
       } catch (error) {
@@ -858,6 +895,10 @@ class Session {
     }
   }
 }
+
+export const TEST_ONLY = {
+  Session,
+};
 
 function toToolCallContent(toolResult: ToolResult): acp.ToolCallContent | null {
   if (toolResult.error?.message) {

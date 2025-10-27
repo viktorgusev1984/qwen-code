@@ -90,6 +90,7 @@ function parseApprovalModeValue(value: string): ApprovalMode {
 export interface CliArgs {
   query: string | undefined;
   model: string | undefined;
+  streamingMode: 'stream' | 'sync' | undefined;
   sandbox: boolean | string | undefined;
   sandboxImage: string | undefined;
   debug: boolean | undefined;
@@ -211,6 +212,12 @@ export async function parseArguments(settings: Settings): Promise<CliArgs> {
           alias: 'm',
           type: 'string',
           description: `Model`,
+        })
+        .option('streaming-mode', {
+          type: 'string',
+          choices: ['stream', 'sync'],
+          description:
+            'Select how responses are delivered: streaming (default) or synchronous.',
         })
         .option('prompt', {
           alias: 'p',
@@ -771,6 +778,10 @@ export async function loadCliConfig(
     output: {
       format: (argv.outputFormat ?? settings.output?.format) as OutputFormat,
     },
+    streamingMode:
+      (argv.streamingMode ?? settings.model?.streamingMode ?? 'stream') as
+        | 'stream'
+        | 'sync',
   });
 }
 

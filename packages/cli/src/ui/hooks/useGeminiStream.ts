@@ -72,6 +72,32 @@ enum StreamProcessingStatus {
   Error,
 }
 
+async function* bufferGeminiEvents(
+  stream: AsyncIterable<GeminiEvent>,
+): AsyncGenerator<GeminiEvent> {
+  let bufferedContent = '';
+  for await (const event of stream) {
+    if (event.type === ServerGeminiEventType.Content) {
+      bufferedContent += event.value;
+      continue;
+    }
+    if (bufferedContent) {
+      yield {
+        type: ServerGeminiEventType.Content,
+        value: bufferedContent,
+      } as GeminiEvent;
+      bufferedContent = '';
+    }
+    yield event;
+  }
+  if (bufferedContent) {
+    yield {
+      type: ServerGeminiEventType.Content,
+      value: bufferedContent,
+    } as GeminiEvent;
+  }
+}
+
 const EDIT_TOOL_NAMES = new Set(['replace', 'write_file']);
 
 function showCitations(settings: LoadedSettings): boolean {
@@ -870,11 +896,20 @@ export const useGeminiStream = (
         setInitError(null);
 
         try {
-          const stream = geminiClient.sendMessageStream(
-            finalQueryToSend,
-            abortSignal,
-            prompt_id!,
-          );
+          const shouldStream = config.shouldStreamResponses();
+          const stream = shouldStream
+            ? geminiClient.sendMessageStream(
+                finalQueryToSend,
+                abortSignal,
+                prompt_id!,
+              )
+            : bufferGeminiEvents(
+                geminiClient.sendMessageSync(
+                  finalQueryToSend,
+                  abortSignal,
+                  prompt_id!,
+                ),
+              );
           const processingStatus = await processGeminiStreamEvents(
             stream,
             userMessageTimestamp,

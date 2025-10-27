@@ -207,6 +207,8 @@ export interface SandboxConfig {
   image: string;
 }
 
+export type StreamingMode = 'stream' | 'sync';
+
 export interface ConfigParameters {
   sessionId: string;
   embeddingModel?: string;
@@ -279,6 +281,7 @@ export interface ConfigParameters {
   eventEmitter?: EventEmitter;
   useSmartEdit?: boolean;
   output?: OutputSettings;
+  streamingMode?: StreamingMode;
 }
 
 export class Config {
@@ -370,6 +373,7 @@ export class Config {
   private readonly eventEmitter?: EventEmitter;
   private readonly useSmartEdit: boolean;
   private readonly outputSettings: OutputSettings;
+  private readonly streamingMode: StreamingMode;
 
   constructor(params: ConfigParameters) {
     this.sessionId = params.sessionId;
@@ -480,6 +484,7 @@ export class Config {
     this.outputSettings = {
       format: params.output?.format ?? OutputFormat.TEXT,
     };
+    this.streamingMode = params.streamingMode ?? 'stream';
 
     if (params.contextFileName) {
       setGeminiMdFilename(params.contextFileName);
@@ -1029,6 +1034,14 @@ export class Config {
     return this.outputSettings?.format
       ? this.outputSettings.format
       : OutputFormat.TEXT;
+  }
+
+  getStreamingMode(): StreamingMode {
+    return this.streamingMode;
+  }
+
+  shouldStreamResponses(): boolean {
+    return this.streamingMode === 'stream';
   }
 
   async getGitService(): Promise<GitService> {

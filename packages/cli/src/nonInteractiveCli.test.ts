@@ -67,6 +67,7 @@ describe('runNonInteractive', () => {
   let processStdoutSpy: vi.SpyInstance;
   let mockGeminiClient: {
     sendMessageStream: vi.Mock;
+    sendMessageSync: vi.Mock;
     getChatRecordingService: vi.Mock;
   };
 
@@ -93,6 +94,7 @@ describe('runNonInteractive', () => {
 
     mockGeminiClient = {
       sendMessageStream: vi.fn(),
+      sendMessageSync: vi.fn(),
       getChatRecordingService: vi.fn(() => ({
         initialize: vi.fn(),
         recordMessage: vi.fn(),
@@ -118,6 +120,7 @@ describe('runNonInteractive', () => {
       getOutputFormat: vi.fn().mockReturnValue('text'),
       getFolderTrustFeature: vi.fn().mockReturnValue(false),
       getFolderTrust: vi.fn().mockReturnValue(false),
+      shouldStreamResponses: vi.fn().mockReturnValue(true),
     } as unknown as Config;
 
     mockSettings = {
@@ -190,6 +193,36 @@ describe('runNonInteractive', () => {
     expect(processStdoutSpy).toHaveBeenCalledWith(' World');
     expect(processStdoutSpy).toHaveBeenCalledWith('\n');
     expect(mockShutdownTelemetry).toHaveBeenCalled();
+  });
+
+  it('uses synchronous completions when streaming is disabled', async () => {
+    mockConfig.shouldStreamResponses = vi.fn().mockReturnValue(false);
+    const events: ServerGeminiStreamEvent[] = [
+      { type: GeminiEventType.Content, value: 'Sync hello' },
+      {
+        type: GeminiEventType.Finished,
+        value: { reason: undefined, usageMetadata: { totalTokenCount: 5 } },
+      },
+    ];
+    mockGeminiClient.sendMessageSync.mockReturnValue(
+      createStreamFromEvents(events),
+    );
+
+    await runNonInteractive(
+      mockConfig,
+      mockSettings,
+      'Sync input',
+      'prompt-id-2',
+    );
+
+    expect(mockGeminiClient.sendMessageSync).toHaveBeenCalledWith(
+      [{ text: 'Sync input' }],
+      expect.any(AbortSignal),
+      'prompt-id-2',
+    );
+    expect(mockGeminiClient.sendMessageStream).not.toHaveBeenCalled();
+    expect(processStdoutSpy).toHaveBeenCalledWith('Sync hello');
+    expect(processStdoutSpy).toHaveBeenCalledWith('\n');
   });
 
   it('should handle a single tool call and respond', async () => {
