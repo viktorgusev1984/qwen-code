@@ -211,6 +211,7 @@ export class GeminiChat {
   // A promise to represent the current state of the message being sent to the
   // model.
   private sendPromise: Promise<void> = Promise.resolve();
+  private pendingSyncStreamEvents: StreamEvent[] = [];
   private readonly chatRecordingService: ChatRecordingService;
 
   constructor(
@@ -379,6 +380,7 @@ export class GeminiChat {
     params: SendMessageParameters,
     prompt_id: string,
   ): Promise<GenerateContentResponse> {
+    this.pendingSyncStreamEvents = [];
     const { requestContents, release } = await this.prepareSend(model, params);
 
     try {
@@ -417,6 +419,9 @@ export class GeminiChat {
 
           if (isContentError) {
             if (attempt < INVALID_CONTENT_RETRY_OPTIONS.maxAttempts - 1) {
+              this.pendingSyncStreamEvents.push({
+                type: StreamEventType.RETRY,
+              });
               logContentRetry(
                 this.config,
                 new ContentRetryEvent(
@@ -457,6 +462,12 @@ export class GeminiChat {
     } finally {
       release();
     }
+  }
+
+  drainPendingSyncStreamEvents(): StreamEvent[] {
+    const events = this.pendingSyncStreamEvents;
+    this.pendingSyncStreamEvents = [];
+    return events;
   }
 
   private async makeApiCallAndProcessStream(

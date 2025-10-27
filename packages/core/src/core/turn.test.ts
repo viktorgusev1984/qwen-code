@@ -10,19 +10,28 @@ import type {
   ServerGeminiErrorEvent,
 } from './turn.js';
 import { Turn, GeminiEventType } from './turn.js';
-import type { GenerateContentResponse, Part, Content } from '@google/genai';
+import type {
+  GenerateContentResponse,
+  Part,
+  Content,
+} from '@google/genai';
+import { FinishReason } from '@google/genai';
 import { reportError } from '../utils/errorReporting.js';
 import type { GeminiChat } from './geminiChat.js';
 import { StreamEventType } from './geminiChat.js';
 
 const mockSendMessageStream = vi.fn();
+const mockSendMessage = vi.fn();
 const mockGetHistory = vi.fn();
 const mockMaybeIncludeSchemaDepthContext = vi.fn();
+const mockDrainPendingSyncStreamEvents = vi.fn();
 
 vi.mock('@google/genai', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@google/genai')>();
   const MockChat = vi.fn().mockImplementation(() => ({
     sendMessageStream: mockSendMessageStream,
+    sendMessage: mockSendMessage,
+    drainPendingSyncStreamEvents: mockDrainPendingSyncStreamEvents,
     getHistory: mockGetHistory,
     maybeIncludeSchemaDepthContext: mockMaybeIncludeSchemaDepthContext,
   }));
@@ -48,6 +57,8 @@ describe('Turn', () => {
   // Define a type for the mocked Chat instance for clarity
   type MockedChatInstance = {
     sendMessageStream: typeof mockSendMessageStream;
+    sendMessage: typeof mockSendMessage;
+    drainPendingSyncStreamEvents: typeof mockDrainPendingSyncStreamEvents;
     getHistory: typeof mockGetHistory;
     maybeIncludeSchemaDepthContext: typeof mockMaybeIncludeSchemaDepthContext;
   };
@@ -57,12 +68,18 @@ describe('Turn', () => {
     vi.resetAllMocks();
     mockChatInstance = {
       sendMessageStream: mockSendMessageStream,
+      sendMessage: mockSendMessage,
+      drainPendingSyncStreamEvents: mockDrainPendingSyncStreamEvents,
       getHistory: mockGetHistory,
       maybeIncludeSchemaDepthContext: mockMaybeIncludeSchemaDepthContext,
     };
     turn = new Turn(mockChatInstance as unknown as GeminiChat, 'prompt-id-1');
     mockGetHistory.mockReturnValue([]);
     mockSendMessageStream.mockResolvedValue((async function* () {})());
+    mockSendMessage.mockResolvedValue({
+      candidates: [],
+    } as GenerateContentResponse);
+    mockDrainPendingSyncStreamEvents.mockReturnValue([]);
   });
 
   afterEach(() => {
@@ -760,6 +777,54 @@ describe('Turn', () => {
       expect(events).toEqual([
         { type: GeminiEventType.Retry },
         { type: GeminiEventType.Content, value: 'Success' },
+      ]);
+    });
+
+    it('should flush queued retry events before yielding sync response chunks', async () => {
+      const syncResponse = {
+        candidates: [
+          {
+            content: { parts: [{ text: 'All good' }] },
+            finishReason: FinishReason.STOP,
+            usageMetadata: { totalTokenCount: 10 },
+          },
+        ],
+      } as unknown as GenerateContentResponse;
+
+      mockSendMessage.mockResolvedValue(syncResponse);
+      mockDrainPendingSyncStreamEvents.mockReturnValueOnce([
+        { type: StreamEventType.RETRY },
+      ]);
+
+      const events = [];
+      const signal = new AbortController().signal;
+      for await (const event of turn.run(
+        'test-model',
+        [{ text: 'Sync please' }],
+        signal,
+        'sync',
+      )) {
+        events.push(event);
+      }
+
+      expect(mockSendMessage).toHaveBeenCalledWith(
+        'test-model',
+        {
+          message: [{ text: 'Sync please' }],
+          config: { abortSignal: signal },
+        },
+        'prompt-id-1',
+      );
+      expect(mockDrainPendingSyncStreamEvents).toHaveBeenCalledTimes(1);
+      expect(mockSendMessageStream).not.toHaveBeenCalled();
+
+      expect(events).toEqual([
+        { type: GeminiEventType.Retry },
+        { type: GeminiEventType.Content, value: 'All good' },
+        {
+          type: GeminiEventType.Finished,
+          value: { reason: FinishReason.STOP, usageMetadata: undefined },
+        },
       ]);
     });
   });

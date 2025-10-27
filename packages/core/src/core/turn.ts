@@ -252,7 +252,11 @@ export class Turn {
           },
           this.prompt_id,
         );
+        const pendingEvents = this.chat.drainPendingSyncStreamEvents();
         responseStream = (async function* () {
+          for (const pendingEvent of pendingEvents) {
+            yield pendingEvent;
+          }
           yield { type: StreamEventType.CHUNK, value: response };
         })();
       }
@@ -332,6 +336,10 @@ export class Turn {
         }
       }
     } catch (e) {
+      if (mode === 'sync') {
+        // Ensure no stale events leak into the next turn if an error occurs.
+        this.chat.drainPendingSyncStreamEvents();
+      }
       if (signal.aborted) {
         yield { type: GeminiEventType.UserCancelled };
         // Regular cancellation error, fail gracefully.
