@@ -323,14 +323,14 @@ export class Turn {
           };
         }
       }
-    } catch (e) {
+    } catch (_e) {
       if (signal.aborted) {
         yield { type: GeminiEventType.UserCancelled };
         // Regular cancellation error, fail gracefully.
         return;
       }
 
-      const error = toFriendlyError(e);
+      const error = toFriendlyError(_e);
       if (error instanceof UnauthorizedError) {
         throw error;
       }
@@ -378,11 +378,14 @@ export class Turn {
         }
 
         this.toolCallTextBuffer += text.slice(index, closeIndex);
-        const event = this.createToolCallEventFromJson(
+        const result = this.createToolCallEventsFromJson(
           this.toolCallTextBuffer.trim(),
         );
-        if (event) {
-          toolCallEvents.push(event);
+        if (result) {
+          toolCallEvents.push(...result.events);
+          if (result.fallbackContent) {
+            content += result.fallbackContent;
+          }
         } else {
           content += `${openTag}${this.toolCallTextBuffer}${closeTag}`;
         }
@@ -408,9 +411,12 @@ export class Turn {
       }
 
       const payload = text.slice(index, closeIndex);
-      const event = this.createToolCallEventFromJson(payload.trim());
-      if (event) {
-        toolCallEvents.push(event);
+      const result = this.createToolCallEventsFromJson(payload.trim());
+      if (result) {
+        toolCallEvents.push(...result.events);
+        if (result.fallbackContent) {
+          content += result.fallbackContent;
+        }
       } else {
         content += `${openTag}${payload}${closeTag}`;
       }
@@ -420,9 +426,11 @@ export class Turn {
     return { events: toolCallEvents, content };
   }
 
-  private createToolCallEventFromJson(
+  private createToolCallEventsFromJson(
     jsonPayload: string,
-  ): ServerGeminiStreamEvent | null {
+  ):
+    | { events: ServerGeminiStreamEvent[]; fallbackContent: string }
+    | null {
     if (!jsonPayload) {
       return null;
     }
@@ -440,6 +448,51 @@ export class Turn {
 
     const candidate = parsed as Record<string, unknown>;
 
+    const fallbackContent =
+      typeof candidate['content'] === 'string' ? candidate['content'] : '';
+
+    const events: ServerGeminiStreamEvent[] = [];
+
+    const toolCalls = Array.isArray(candidate['tool_calls'])
+      ? (candidate['tool_calls'] as unknown[])
+      : null;
+
+    if (toolCalls) {
+      for (const toolCall of toolCalls) {
+        if (toolCall && typeof toolCall === 'object') {
+          const fnCall = this.createFunctionCallFromCandidate(
+            toolCall as Record<string, unknown>,
+          );
+          if (fnCall) {
+            const event = this.handlePendingFunctionCall(fnCall);
+            if (event) {
+              events.push(event);
+            }
+          }
+        }
+      }
+    }
+
+    if (events.length === 0) {
+      const fnCall = this.createFunctionCallFromCandidate(candidate);
+      if (fnCall) {
+        const event = this.handlePendingFunctionCall(fnCall);
+        if (event) {
+          events.push(event);
+        }
+      }
+    }
+
+    if (events.length === 0) {
+      return null;
+    }
+
+    return { events, fallbackContent };
+  }
+
+  private createFunctionCallFromCandidate(
+    candidate: Record<string, unknown>,
+  ): FunctionCall | null {
     const functionDataRaw = candidate['function'];
     const functionData =
       functionDataRaw && typeof functionDataRaw === 'object'
@@ -481,13 +534,11 @@ export class Turn {
       args = argsCandidate as Record<string, unknown>;
     }
 
-    const fnCall: FunctionCall = {
+    return {
       id: typeof idCandidate === 'string' ? idCandidate : undefined,
       name: nameCandidate,
       args,
     } as FunctionCall;
-
-    return this.handlePendingFunctionCall(fnCall);
   }
 
   private handlePendingFunctionCall(
