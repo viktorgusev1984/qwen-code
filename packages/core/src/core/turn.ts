@@ -440,19 +440,25 @@ export class Turn {
 
     const candidate = parsed as Record<string, unknown>;
 
+    const functionDataRaw = candidate['function'];
     const functionData =
-      (candidate.function as Record<string, unknown> | undefined) ?? undefined;
+      functionDataRaw && typeof functionDataRaw === 'object'
+        ? (functionDataRaw as Record<string, unknown>)
+        : undefined;
 
-    const nameCandidate = candidate.name ?? functionData?.name;
+    const nameCandidate =
+      candidate['name'] ?? functionData?.['name'];
     const idCandidate =
-      candidate.id ??
-      candidate.callId ??
-      candidate.call_id ??
-      candidate.tool_call_id ??
-      functionData?.id;
+      candidate['id'] ??
+      candidate['callId'] ??
+      candidate['call_id'] ??
+      candidate['tool_call_id'] ??
+      functionData?.['id'];
 
     const argsCandidate =
-      candidate.arguments ?? candidate.args ?? functionData?.arguments;
+      candidate['arguments'] ??
+      candidate['args'] ??
+      functionData?.['arguments'];
 
     if (typeof nameCandidate !== 'string' || nameCandidate.length === 0) {
       return null;
