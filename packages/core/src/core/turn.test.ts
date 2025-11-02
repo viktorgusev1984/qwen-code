@@ -8,6 +8,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type {
   ServerGeminiToolCallRequestEvent,
   ServerGeminiErrorEvent,
+  ServerGeminiStreamEvent,
 } from './turn.js';
 import { Turn, GeminiEventType } from './turn.js';
 import type { GenerateContentResponse, Part, Content } from '@google/genai';
@@ -180,6 +181,99 @@ describe('Turn', () => {
       );
       expect(turn.pendingToolCalls[1]).toEqual(event2.value);
       expect(turn.getDebugResponses().length).toBe(1);
+    });
+
+    it('should convert <tool_call> text into tool call request events', async () => {
+      const mockResponseStream = (async function* () {
+        yield {
+          type: StreamEventType.CHUNK,
+          value: {
+            candidates: [
+              {
+                content: {
+                  parts: [
+                    {
+                      text: '<tool_call>{"name":"text_tool","arguments":{"foo":"bar"}}</tool_call>',
+                    },
+                  ],
+                },
+              },
+            ],
+          } as GenerateContentResponse,
+        };
+      })();
+      mockSendMessageStream.mockResolvedValue(mockResponseStream);
+
+      const events: ServerGeminiStreamEvent[] = [];
+      for await (const event of turn.run(
+        'test-model',
+        [{ text: 'Use tools' }],
+        new AbortController().signal,
+      )) {
+        events.push(event);
+      }
+
+      expect(events).toHaveLength(1);
+      const [event] = events as ServerGeminiToolCallRequestEvent[];
+      expect(event.type).toBe(GeminiEventType.ToolCallRequest);
+      expect(event.value.name).toBe('text_tool');
+      expect(event.value.args).toEqual({ foo: 'bar' });
+      expect(event.value.callId).toBeDefined();
+      expect(turn.pendingToolCalls).toHaveLength(1);
+    });
+
+    it('should handle streamed <tool_call> text across multiple chunks', async () => {
+      const mockResponseStream = (async function* () {
+        yield {
+          type: StreamEventType.CHUNK,
+          value: {
+            candidates: [
+              {
+                content: {
+                  parts: [
+                    {
+                      text: '<tool_call>{"name":"stream_tool","arguments":{"foo":',
+                    },
+                  ],
+                },
+              },
+            ],
+          } as GenerateContentResponse,
+        };
+        yield {
+          type: StreamEventType.CHUNK,
+          value: {
+            candidates: [
+              {
+                content: {
+                  parts: [
+                    {
+                      text: '"bar"}}</tool_call>',
+                    },
+                  ],
+                },
+              },
+            ],
+          } as GenerateContentResponse,
+        };
+      })();
+      mockSendMessageStream.mockResolvedValue(mockResponseStream);
+
+      const events: ServerGeminiStreamEvent[] = [];
+      for await (const event of turn.run(
+        'test-model',
+        [{ text: 'Use tools' }],
+        new AbortController().signal,
+      )) {
+        events.push(event);
+      }
+
+      expect(events).toHaveLength(1);
+      const [event] = events as ServerGeminiToolCallRequestEvent[];
+      expect(event.type).toBe(GeminiEventType.ToolCallRequest);
+      expect(event.value.name).toBe('stream_tool');
+      expect(event.value.args).toEqual({ foo: 'bar' });
+      expect(turn.pendingToolCalls).toHaveLength(1);
     });
 
     it('should yield UserCancelled event if signal is aborted', async () => {

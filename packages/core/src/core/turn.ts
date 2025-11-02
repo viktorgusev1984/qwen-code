@@ -215,6 +215,7 @@ export class Turn {
   private pendingCitations = new Set<string>();
   finishReason: FinishReason | undefined = undefined;
   private currentResponseId?: string;
+  private toolCallTextBuffer: string | null = null;
 
   constructor(
     private readonly chat: GeminiChat,
@@ -275,7 +276,15 @@ export class Turn {
 
         const text = getResponseText(resp);
         if (text) {
-          yield { type: GeminiEventType.Content, value: text };
+          const { events: toolCallEvents, content } = this.processToolCallText(
+            text,
+          );
+          for (const event of toolCallEvents) {
+            yield event;
+          }
+          if (content) {
+            yield { type: GeminiEventType.Content, value: content };
+          }
         }
 
         // Handle function calls (requesting tool execution)
@@ -348,6 +357,131 @@ export class Turn {
       yield { type: GeminiEventType.Error, value: { error: structuredError } };
       return;
     }
+  }
+
+  private processToolCallText(
+    text: string,
+  ): { events: ServerGeminiStreamEvent[]; content: string } {
+    const toolCallEvents: ServerGeminiStreamEvent[] = [];
+    let content = '';
+    let index = 0;
+    const openTag = '<tool_call>';
+    const closeTag = '</tool_call>';
+
+    while (index < text.length) {
+      if (this.toolCallTextBuffer !== null) {
+        const closeIndex = text.indexOf(closeTag, index);
+        if (closeIndex === -1) {
+          this.toolCallTextBuffer += text.slice(index);
+          index = text.length;
+          break;
+        }
+
+        this.toolCallTextBuffer += text.slice(index, closeIndex);
+        const event = this.createToolCallEventFromJson(
+          this.toolCallTextBuffer.trim(),
+        );
+        if (event) {
+          toolCallEvents.push(event);
+        } else {
+          content += `${openTag}${this.toolCallTextBuffer}${closeTag}`;
+        }
+        this.toolCallTextBuffer = null;
+        index = closeIndex + closeTag.length;
+        continue;
+      }
+
+      const openIndex = text.indexOf(openTag, index);
+      if (openIndex === -1) {
+        content += text.slice(index);
+        break;
+      }
+
+      content += text.slice(index, openIndex);
+      index = openIndex + openTag.length;
+
+      const closeIndex = text.indexOf(closeTag, index);
+      if (closeIndex === -1) {
+        this.toolCallTextBuffer = text.slice(index);
+        index = text.length;
+        break;
+      }
+
+      const payload = text.slice(index, closeIndex);
+      const event = this.createToolCallEventFromJson(payload.trim());
+      if (event) {
+        toolCallEvents.push(event);
+      } else {
+        content += `${openTag}${payload}${closeTag}`;
+      }
+      index = closeIndex + closeTag.length;
+    }
+
+    return { events: toolCallEvents, content };
+  }
+
+  private createToolCallEventFromJson(
+    jsonPayload: string,
+  ): ServerGeminiStreamEvent | null {
+    if (!jsonPayload) {
+      return null;
+    }
+
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(jsonPayload);
+    } catch (error) {
+      return null;
+    }
+
+    if (!parsed || typeof parsed !== 'object') {
+      return null;
+    }
+
+    const candidate = parsed as Record<string, unknown>;
+
+    const functionData =
+      (candidate.function as Record<string, unknown> | undefined) ?? undefined;
+
+    const nameCandidate = candidate.name ?? functionData?.name;
+    const idCandidate =
+      candidate.id ??
+      candidate.callId ??
+      candidate.call_id ??
+      candidate.tool_call_id ??
+      functionData?.id;
+
+    const argsCandidate =
+      candidate.arguments ?? candidate.args ?? functionData?.arguments;
+
+    if (typeof nameCandidate !== 'string' || nameCandidate.length === 0) {
+      return null;
+    }
+
+    let args: Record<string, unknown> = {};
+    if (typeof argsCandidate === 'string') {
+      const trimmedArgs = argsCandidate.trim();
+      if (trimmedArgs) {
+        try {
+          const parsedArgs = JSON.parse(trimmedArgs);
+          if (parsedArgs && typeof parsedArgs === 'object') {
+            args = parsedArgs as Record<string, unknown>;
+          }
+        } catch (error) {
+          return null;
+        }
+      }
+    } else if (argsCandidate && typeof argsCandidate === 'object') {
+      args = argsCandidate as Record<string, unknown>;
+    }
+
+    const fnCall: FunctionCall = {
+      id: typeof idCandidate === 'string' ? idCandidate : undefined,
+      name: nameCandidate,
+      args,
+    } as FunctionCall;
+
+    return this.handlePendingFunctionCall(fnCall);
   }
 
   private handlePendingFunctionCall(
