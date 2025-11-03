@@ -321,11 +321,13 @@ export async function processSingleFileContent(
   try {
     if (!fs.existsSync(filePath)) {
       // Sync check is acceptable before async read
+      const recommendation =
+        'Recommendation: locate the file before attempting to read it.';
       return {
         llmContent:
           'Could not read file because no file was found at the specified path.',
-        returnDisplay: 'File not found.',
-        error: `File not found: ${filePath}`,
+        returnDisplay: `File not found. ${recommendation}`,
+        error: `File not found: ${filePath}. ${recommendation}`,
         errorType: ToolErrorType.FILE_NOT_FOUND,
       };
     }
