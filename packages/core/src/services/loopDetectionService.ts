@@ -79,6 +79,7 @@ export class LoopDetectionService {
   // Tool call tracking
   private lastToolCallKey: string | null = null;
   private toolCallRepetitionCount: number = 0;
+  private lastDetectedLoopType: LoopType | null = null;
 
   // Content streaming tracking
   private streamContentHistory = '';
@@ -108,6 +109,10 @@ export class LoopDetectionService {
       this.config,
       new LoopDetectionDisabledEvent(this.promptId),
     );
+  }
+
+  getLastDetectedLoopType(): LoopType | null {
+    return this.lastDetectedLoopType;
   }
 
   private getToolCallKey(toolCall: { name: string; args: object }): string {
@@ -178,6 +183,7 @@ export class LoopDetectionService {
       this.toolCallRepetitionCount = 1;
     }
     if (this.toolCallRepetitionCount >= TOOL_CALL_LOOP_THRESHOLD) {
+      this.lastDetectedLoopType = LoopType.CONSECUTIVE_IDENTICAL_TOOL_CALLS;
       logLoopDetected(
         this.config,
         new LoopDetectedEvent(
@@ -291,6 +297,7 @@ export class LoopDetectionService {
       const chunkHash = createHash('sha256').update(currentChunk).digest('hex');
 
       if (this.isLoopDetectedForChunk(currentChunk, chunkHash)) {
+        this.lastDetectedLoopType = LoopType.CHANTING_IDENTICAL_SENTENCES;
         logLoopDetected(
           this.config,
           new LoopDetectedEvent(
@@ -440,6 +447,7 @@ export class LoopDetectionService {
         if (typeof result['reasoning'] === 'string' && result['reasoning']) {
           console.warn(result['reasoning']);
         }
+        this.lastDetectedLoopType = LoopType.LLM_DETECTED_LOOP;
         logLoopDetected(
           this.config,
           new LoopDetectedEvent(LoopType.LLM_DETECTED_LOOP, this.promptId),
@@ -465,6 +473,7 @@ export class LoopDetectionService {
     this.resetContentTracking();
     this.resetLlmCheckTracking();
     this.loopDetected = false;
+    this.lastDetectedLoopType = null;
   }
 
   private resetToolCallCount(): void {

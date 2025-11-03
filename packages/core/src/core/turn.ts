@@ -18,6 +18,7 @@ import type {
   ToolResult,
   ToolResultDisplay,
 } from '../tools/tools.js';
+import type { LoopType } from '../telemetry/types.js';
 import type { ToolErrorType } from '../tools/tool-error.js';
 import { getResponseText } from '../utils/partUtils.js';
 import { reportError } from '../utils/errorReporting.js';
@@ -184,6 +185,9 @@ export type ServerGeminiFinishedEvent = {
 
 export type ServerGeminiLoopDetectedEvent = {
   type: GeminiEventType.LoopDetected;
+  value?: {
+    loopType?: LoopType | null;
+  };
 };
 
 export type ServerGeminiCitationEvent = {

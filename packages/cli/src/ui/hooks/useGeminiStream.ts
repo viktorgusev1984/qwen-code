@@ -9,6 +9,7 @@ import type {
   Config,
   EditorType,
   GeminiClient,
+  LoopType,
   ServerGeminiChatCompressedEvent,
   ServerGeminiContentEvent as ContentEvent,
   ServerGeminiFinishedEvent,
@@ -175,7 +176,7 @@ export const useGeminiStream = (
     return undefined;
   }, [toolCalls]);
 
-  const loopDetectedRef = useRef(false);
+  const loopDetectedRef = useRef<LoopType | null | undefined>(undefined);
   const [
     loopDetectionConfirmationRequest,
     setLoopDetectionConfirmationRequest,
@@ -692,12 +693,26 @@ export const useGeminiStream = (
     [config, addItem],
   );
 
-  const handleLoopDetectedEvent = useCallback(() => {
-    // Show the confirmation dialog to choose whether to disable loop detection
-    setLoopDetectionConfirmationRequest({
-      onComplete: handleLoopDetectionConfirmation,
-    });
-  }, [handleLoopDetectionConfirmation]);
+  const handleLoopDetectedEvent = useCallback(
+    (loopType?: LoopType | null) => {
+      if (loopType === 'consecutive_identical_tool_calls') {
+        addItem(
+          {
+            type: MessageType.INFO,
+            text:
+              'Repeated use of the same tool was detected. Consider trying a different search approach to gather new information.',
+          },
+          Date.now(),
+        );
+      }
+
+      // Show the confirmation dialog to choose whether to disable loop detection
+      setLoopDetectionConfirmationRequest({
+        onComplete: handleLoopDetectionConfirmation,
+      });
+    },
+    [addItem, handleLoopDetectionConfirmation],
+  );
 
   const processGeminiStreamEvents = useCallback(
     async (
@@ -753,7 +768,7 @@ export const useGeminiStream = (
           case ServerGeminiEventType.LoopDetected:
             // handle later because we want to move pending history to history
             // before we add loop detected message to history
-            loopDetectedRef.current = true;
+            loopDetectedRef.current = event.value?.loopType ?? null;
             break;
           case ServerGeminiEventType.Retry:
             // Will add the missing logic later
@@ -894,9 +909,10 @@ export const useGeminiStream = (
             addItem(pendingHistoryItemRef.current, userMessageTimestamp);
             setPendingHistoryItem(null);
           }
-          if (loopDetectedRef.current) {
-            loopDetectedRef.current = false;
-            handleLoopDetectedEvent();
+          if (loopDetectedRef.current !== undefined) {
+            const detectedLoopType = loopDetectedRef.current;
+            loopDetectedRef.current = undefined;
+            handleLoopDetectedEvent(detectedLoopType);
           }
 
           // Restore original model if it was temporarily overridden

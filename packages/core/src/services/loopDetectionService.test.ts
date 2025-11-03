@@ -94,6 +94,17 @@ describe('LoopDetectionService', () => {
       expect(loggers.logLoopDetected).toHaveBeenCalledTimes(1);
     });
 
+    it('should expose the last detected loop type for tool call loops', () => {
+      const event = createToolCallRequestEvent('testTool', { param: 'value' });
+      for (let i = 0; i < TOOL_CALL_LOOP_THRESHOLD; i++) {
+        service.addAndCheck(event);
+      }
+
+      expect(service.getLastDetectedLoopType()).toBe(
+        LoopType.CONSECUTIVE_IDENTICAL_TOOL_CALLS,
+      );
+    });
+
     it('should not detect a loop for different tool calls', () => {
       const event1 = createToolCallRequestEvent('testTool', {
         param: 'value1',
@@ -141,6 +152,17 @@ describe('LoopDetectionService', () => {
         expect(service.addAndCheck(event)).toBe(false);
       }
       expect(loggers.logLoopDetected).not.toHaveBeenCalled();
+    });
+
+    it('should clear the last detected loop type on reset', () => {
+      const event = createToolCallRequestEvent('testTool', { param: 'value' });
+      for (let i = 0; i < TOOL_CALL_LOOP_THRESHOLD; i++) {
+        service.addAndCheck(event);
+      }
+
+      service.reset('new-prompt');
+
+      expect(service.getLastDetectedLoopType()).toBeNull();
     });
   });
 
