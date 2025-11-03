@@ -323,14 +323,14 @@ export class Turn {
           };
         }
       }
-    } catch (_e) {
+    } catch (_error) {
       if (signal.aborted) {
         yield { type: GeminiEventType.UserCancelled };
         // Regular cancellation error, fail gracefully.
         return;
       }
 
-      const error = toFriendlyError(_e);
+      const error = toFriendlyError(_error);
       if (error instanceof UnauthorizedError) {
         throw error;
       }
@@ -449,12 +449,22 @@ export class Turn {
     const candidate = parsed as Record<string, unknown>;
 
     const fallbackContent =
-      typeof candidate['content'] === 'string' ? candidate['content'] : '';
+      typeof candidate['content'] === 'string'
+        ? candidate['content']
+        : typeof candidate['text'] === 'string'
+          ? candidate['text']
+          : '';
 
     const events: ServerGeminiStreamEvent[] = [];
 
-    const toolCalls = Array.isArray(candidate['tool_calls'])
-      ? (candidate['tool_calls'] as unknown[])
+    const toolCallsCandidate =
+      candidate['tool_calls'] ??
+      candidate['toolCalls'] ??
+      candidate['function_calls'] ??
+      candidate['functionCalls'];
+
+    const toolCalls = Array.isArray(toolCallsCandidate)
+      ? (toolCallsCandidate as unknown[])
       : null;
 
     if (toolCalls) {
@@ -493,7 +503,10 @@ export class Turn {
   private createFunctionCallFromCandidate(
     candidate: Record<string, unknown>,
   ): FunctionCall | null {
-    const functionDataRaw = candidate['function'];
+    const functionDataRaw =
+      candidate['function'] ??
+      candidate['function_call'] ??
+      candidate['functionCall'];
     const functionData =
       functionDataRaw && typeof functionDataRaw === 'object'
         ? (functionDataRaw as Record<string, unknown>)
@@ -506,12 +519,16 @@ export class Turn {
       candidate['callId'] ??
       candidate['call_id'] ??
       candidate['tool_call_id'] ??
-      functionData?.['id'];
+      functionData?.['id'] ??
+      functionData?.['callId'] ??
+      functionData?.['call_id'] ??
+      functionData?.['tool_call_id'];
 
     const argsCandidate =
       candidate['arguments'] ??
       candidate['args'] ??
-      functionData?.['arguments'];
+      functionData?.['arguments'] ??
+      functionData?.['args'];
 
     if (typeof nameCandidate !== 'string' || nameCandidate.length === 0) {
       return null;

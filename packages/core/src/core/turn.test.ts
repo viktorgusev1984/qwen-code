@@ -349,6 +349,128 @@ describe('Turn', () => {
       expect(turn.pendingToolCalls[0]).toEqual(toolCallEvent.value);
     });
 
+    it('should support camelCase toolCalls with nested functionCall data', async () => {
+      const toolCallMessage = {
+        role: 'assistant',
+        content: 'Please fix the indentation in the catch block.',
+        toolCalls: [
+          {
+            id: 'call-abc123',
+            functionCall: {
+              name: 'edit',
+              args: JSON.stringify({
+                file_path: 'repo/file.ts',
+                old_string: '    } catch (error) {',
+                new_string: '  } catch (error) {',
+              }),
+            },
+          },
+        ],
+      };
+
+      const mockResponseStream = (async function* () {
+        yield {
+          type: StreamEventType.CHUNK,
+          value: {
+            candidates: [
+              {
+                content: {
+                  parts: [
+                    {
+                      text: `<tool_call>${JSON.stringify(toolCallMessage)}</tool_call>`,
+                    },
+                  ],
+                },
+              },
+            ],
+          } as GenerateContentResponse,
+        };
+      })();
+
+      mockSendMessageStream.mockResolvedValue(mockResponseStream);
+
+      const events: ServerGeminiStreamEvent[] = [];
+      for await (const event of turn.run(
+        'test-model',
+        [{ text: 'trigger camelCase tool call' }],
+        new AbortController().signal,
+      )) {
+        events.push(event);
+      }
+
+      expect(events).toHaveLength(2);
+      const toolCallEvent = events[0] as ServerGeminiToolCallRequestEvent;
+      expect(toolCallEvent.type).toBe(GeminiEventType.ToolCallRequest);
+      expect(toolCallEvent.value).toMatchObject({
+        callId: 'call-abc123',
+        name: 'edit',
+        args: {
+          file_path: 'repo/file.ts',
+          old_string: '    } catch (error) {',
+          new_string: '  } catch (error) {',
+        },
+      });
+
+      const contentEvent = events[1];
+      expect(contentEvent).toEqual({
+        type: GeminiEventType.Content,
+        value: 'Please fix the indentation in the catch block.',
+      });
+    });
+
+    it('should convert single functionCall payloads without tool call arrays', async () => {
+      const toolCallMessage = {
+        role: 'assistant',
+        text: 'Running shell command',
+        functionCall: {
+          name: 'shell',
+          args: JSON.stringify({ command: 'ls' }),
+        },
+      };
+
+      const mockResponseStream = (async function* () {
+        yield {
+          type: StreamEventType.CHUNK,
+          value: {
+            candidates: [
+              {
+                content: {
+                  parts: [
+                    {
+                      text: `<tool_call>${JSON.stringify(toolCallMessage)}</tool_call>`,
+                    },
+                  ],
+                },
+              },
+            ],
+          } as GenerateContentResponse,
+        };
+      })();
+
+      mockSendMessageStream.mockResolvedValue(mockResponseStream);
+
+      const events: ServerGeminiStreamEvent[] = [];
+      for await (const event of turn.run(
+        'test-model',
+        [{ text: 'trigger single function call' }],
+        new AbortController().signal,
+      )) {
+        events.push(event);
+      }
+
+      expect(events).toHaveLength(2);
+      const toolCallEvent = events[0] as ServerGeminiToolCallRequestEvent;
+      expect(toolCallEvent.type).toBe(GeminiEventType.ToolCallRequest);
+      expect(toolCallEvent.value.name).toBe('shell');
+      expect(toolCallEvent.value.args).toEqual({ command: 'ls' });
+
+      const contentEvent = events[1];
+      expect(contentEvent).toEqual({
+        type: GeminiEventType.Content,
+        value: 'Running shell command',
+      });
+    });
+
     it('should yield UserCancelled event if signal is aborted', async () => {
       const abortController = new AbortController();
       const mockResponseStream = (async function* () {
