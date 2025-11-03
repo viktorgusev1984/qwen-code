@@ -572,7 +572,12 @@ export class GeminiClient {
     if (!this.config.getSkipLoopDetection()) {
       const loopDetected = await this.loopDetector.turnStarted(signal);
       if (loopDetected) {
-        yield { type: GeminiEventType.LoopDetected };
+        yield {
+          type: GeminiEventType.LoopDetected,
+          value: {
+            loopType: this.loopDetector.getLastDetectedLoopType() ?? undefined,
+          },
+        };
         return turn;
       }
     }
@@ -608,7 +613,12 @@ export class GeminiClient {
     for await (const event of resultStream) {
       if (!this.config.getSkipLoopDetection()) {
         if (this.loopDetector.addAndCheck(event)) {
-          yield { type: GeminiEventType.LoopDetected };
+          yield {
+            type: GeminiEventType.LoopDetected,
+            value: {
+              loopType: this.loopDetector.getLastDetectedLoopType() ?? undefined,
+            },
+          };
           return turn;
         }
       }

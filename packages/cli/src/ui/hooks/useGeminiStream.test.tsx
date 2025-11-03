@@ -24,6 +24,7 @@ import type {
   EditorType,
   GeminiClient,
   AnyToolInvocation,
+  LoopType,
 } from '@qwen-code/qwen-code-core';
 import {
   ApprovalMode,
@@ -2811,6 +2812,39 @@ describe('useGeminiStream', () => {
           typeof result.current.loopDetectionConfirmationRequest?.onComplete,
         ).toBe('function');
       });
+    });
+
+    it('should add recommendation message when repeated tool calls are detected', async () => {
+      mockSendMessageStream.mockReturnValue(
+        (async function* () {
+          yield {
+            type: ServerGeminiEventType.LoopDetected,
+            value: {
+              loopType:
+                'consecutive_identical_tool_calls' as LoopType,
+            },
+          };
+        })(),
+      );
+
+      const { result } = renderTestHook();
+
+      await act(async () => {
+        await result.current.submitQuery('test query');
+      });
+
+      await waitFor(() => {
+        expect(mockAddItem).toHaveBeenCalledWith(
+          {
+            type: MessageType.INFO,
+            text:
+              'Repeated use of the same tool was detected. Consider trying a different search approach to gather new information.',
+          },
+          expect.any(Number),
+        );
+      });
+
+      expect(result.current.loopDetectionConfirmationRequest).not.toBeNull();
     });
 
     it('should disable loop detection and show message when user selects "disable"', async () => {

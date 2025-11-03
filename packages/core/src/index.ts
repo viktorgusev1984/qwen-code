@@ -118,6 +118,7 @@ export { OAuthUtils } from './mcp/oauth-utils.js';
 
 // Export telemetry functions
 export * from './telemetry/index.js';
+export { LoopType } from './telemetry/types.js';
 export { sessionId } from './utils/session.js';
 export * from './utils/browser.js';
 // OpenAI Logging Utilities
