@@ -679,7 +679,13 @@ describe('fileUtils', () => {
         new StandardFileSystemService(),
       );
       expect(result.error).toContain('File not found');
+      expect(result.error).toContain(
+        'Recommendation: locate the file before attempting to read it.',
+      );
       expect(result.returnDisplay).toContain('File not found');
+      expect(result.returnDisplay).toContain(
+        'Recommendation: locate the file before attempting to read it.',
+      );
     });
 
     it('should handle read errors for text files', async () => {

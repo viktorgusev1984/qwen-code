@@ -202,12 +202,14 @@ describe('ReadFileTool', () => {
       >;
 
       const result = await invocation.execute(abortSignal);
+      const recommendation =
+        'Recommendation: locate the file before attempting to read it.';
       expect(result).toEqual({
         llmContent:
           'Could not read file because no file was found at the specified path.',
-        returnDisplay: 'File not found.',
+        returnDisplay: `File not found. ${recommendation}`,
         error: {
-          message: `File not found: ${filePath}`,
+          message: `File not found: ${filePath}. ${recommendation}`,
           type: ToolErrorType.FILE_NOT_FOUND,
         },
       });
