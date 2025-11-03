@@ -323,14 +323,14 @@ export class Turn {
           };
         }
       }
-    } catch (_e) {
+    } catch (_error) {
       if (signal.aborted) {
         yield { type: GeminiEventType.UserCancelled };
         // Regular cancellation error, fail gracefully.
         return;
       }
 
-      const error = toFriendlyError(_e);
+      const error = toFriendlyError(_error);
       if (error instanceof UnauthorizedError) {
         throw error;
       }
