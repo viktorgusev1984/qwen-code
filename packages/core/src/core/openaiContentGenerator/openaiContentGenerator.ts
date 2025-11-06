@@ -18,12 +18,14 @@ import type { ContentGeneratorConfig } from '../contentGenerator.js';
 
 export class OpenAIContentGenerator implements ContentGenerator {
   protected pipeline: ContentGenerationPipeline;
+  protected readonly contentGeneratorConfig: ContentGeneratorConfig;
 
   constructor(
     contentGeneratorConfig: ContentGeneratorConfig,
     cliConfig: Config,
     provider: OpenAICompatibleProvider,
   ) {
+    this.contentGeneratorConfig = contentGeneratorConfig;
     // Create pipeline configuration
     const pipelineConfig: PipelineConfig = {
       cliConfig,

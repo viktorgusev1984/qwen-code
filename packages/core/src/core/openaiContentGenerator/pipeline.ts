@@ -16,6 +16,16 @@ import { OpenAIContentConverter } from './converter.js';
 import type { TelemetryService, RequestContext } from './telemetryService.js';
 import type { ErrorHandler } from './errorHandler.js';
 
+function isAsyncIterable<T>(
+  value: unknown,
+): value is AsyncIterable<T> {
+  return (
+    value !== null &&
+    typeof value === 'object' &&
+    typeof (value as AsyncIterable<T>)[Symbol.asyncIterator] === 'function'
+  );
+}
+
 export interface PipelineConfig {
   cliConfig: Config;
   provider: OpenAICompatibleProvider;
@@ -73,22 +83,46 @@ export class ContentGenerationPipeline {
     request: GenerateContentParameters,
     userPromptId: string,
   ): Promise<AsyncGenerator<GenerateContentResponse>> {
+    if (this.contentGeneratorConfig.forceSynchronous) {
+      const response = await this.execute(request, userPromptId);
+      return (async function* () {
+        yield response;
+      })();
+    }
+
     return this.executeWithErrorHandling(
       request,
       userPromptId,
       true,
       async (openaiRequest, context) => {
-        // Stage 1: Create OpenAI stream
-        const stream = (await this.client.chat.completions.create(
+        const response = await this.client.chat.completions.create(
           openaiRequest,
           {
             signal: request.config?.abortSignal,
           },
-        )) as AsyncIterable<OpenAI.Chat.ChatCompletionChunk>;
+        );
+
+        if (!isAsyncIterable<OpenAI.Chat.ChatCompletionChunk>(response)) {
+          const geminiResponse =
+            this.converter.convertOpenAIResponseToGemini(
+              response as OpenAI.Chat.ChatCompletion,
+            );
+
+          await this.config.telemetryService.logSuccess(
+            context,
+            geminiResponse,
+            openaiRequest,
+            response as OpenAI.Chat.ChatCompletion,
+          );
+
+          return (async function* () {
+            yield geminiResponse;
+          })();
+        }
 
         // Stage 2: Process stream with conversion and logging
         return this.processStreamWithLogging(
-          stream,
+          response,
           context,
           openaiRequest,
           request,
@@ -351,8 +385,12 @@ export class ContentGenerationPipeline {
         userPromptId,
         isStreaming,
       );
+      const sanitizedRequest = this.sanitizeStreamingProperties(
+        openaiRequest,
+        isStreaming,
+      );
 
-      const result = await executor(openaiRequest, context);
+      const result = await executor(sanitizedRequest, context);
 
       context.duration = Date.now() - context.startTime;
       return result;
@@ -390,6 +428,10 @@ export class ContentGenerationPipeline {
           userPromptId,
           isStreaming,
         );
+        openaiRequest = this.sanitizeStreamingProperties(
+          openaiRequest,
+          Boolean(isStreaming),
+        );
       } else {
         // For processStreamWithLogging, we don't have userPromptId/isStreaming,
         // so create a minimal request
@@ -406,8 +448,38 @@ export class ContentGenerationPipeline {
       };
     }
 
+    openaiRequest = this.sanitizeStreamingProperties(
+      openaiRequest,
+      Boolean(isStreaming),
+    );
+
     await this.config.telemetryService.logError(context, error, openaiRequest);
     this.config.errorHandler.handle(error, context, request);
+  }
+
+  private sanitizeStreamingProperties(
+    request: OpenAI.Chat.ChatCompletionCreateParams,
+    isStreaming: boolean,
+  ): OpenAI.Chat.ChatCompletionCreateParams {
+    if (isStreaming) {
+      return request;
+    }
+
+    if (!('stream' in request) && !('stream_options' in request)) {
+      return request;
+    }
+
+    const sanitizedRequest = {
+      ...request,
+    } as OpenAI.Chat.ChatCompletionCreateParams & {
+      stream?: boolean;
+      stream_options?: OpenAI.Chat.ChatCompletionCreateParamsStreaming['stream_options'];
+    };
+
+    delete sanitizedRequest.stream;
+    delete sanitizedRequest.stream_options;
+
+    return sanitizedRequest;
   }
 
   /**

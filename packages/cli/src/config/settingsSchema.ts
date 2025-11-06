@@ -600,6 +600,18 @@ const SETTINGS_SCHEMA = {
             childKey: 'disableCacheControl',
             showInDialog: true,
           },
+          forceSynchronous: {
+            type: 'boolean',
+            label: 'Force Synchronous Completions',
+            category: 'Generation Configuration',
+            requiresRestart: false,
+            default: false,
+            description:
+              'Use non-streaming responses for providers that do not support streaming.',
+            parentKey: 'generationConfig',
+            childKey: 'forceSynchronous',
+            showInDialog: true,
+          },
         },
       },
     },

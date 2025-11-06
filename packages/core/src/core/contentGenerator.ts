@@ -64,6 +64,8 @@ export type ContentGeneratorConfig = {
   maxRetries?: number;
   // Disable cache control for DashScope providers
   disableCacheControl?: boolean;
+  // Force all chat completions to use synchronous responses instead of streaming
+  forceSynchronous?: boolean;
   samplingParams?: {
     top_p?: number;
     top_k?: number;

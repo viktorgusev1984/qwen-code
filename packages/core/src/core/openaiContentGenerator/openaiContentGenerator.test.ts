@@ -39,6 +39,7 @@ vi.mock('tiktoken', () => ({
 import { OpenAIContentGenerator } from './openaiContentGenerator.js';
 import type { Config } from '../../config/config.js';
 import { AuthType } from '../contentGenerator.js';
+import type { ContentGeneratorConfig } from '../contentGenerator.js';
 import type {
   GenerateContentParameters,
   CountTokensParameters,
@@ -129,6 +130,96 @@ describe('OpenAIContentGenerator (Refactored)', () => {
     it('should delegate to pipeline.executeStream', async () => {
       // This test verifies the method exists and can be called
       expect(typeof generator.generateContentStream).toBe('function');
+    });
+
+    it('should request non-streaming completions when forceSynchronous is true', async () => {
+      const contentGeneratorConfig = {
+        model: 'gpt-4',
+        apiKey: 'test-key',
+        authType: AuthType.USE_OPENAI,
+        enableOpenAILogging: false,
+        timeout: 120000,
+        maxRetries: 3,
+        forceSynchronous: true,
+      } satisfies ContentGeneratorConfig;
+
+      const mockOpenAIResponse = {
+        id: 'cmpl-test',
+        object: 'chat.completion',
+        created: Date.now(),
+        model: 'gpt-4',
+        choices: [
+          {
+            index: 0,
+            finish_reason: 'stop',
+            message: { role: 'assistant', content: 'Hello' },
+          },
+        ],
+      } as unknown as OpenAI.Chat.ChatCompletion;
+
+      const createMock = vi.fn().mockResolvedValue(mockOpenAIResponse);
+
+      const mockProvider: OpenAICompatibleProvider = {
+        buildHeaders: vi.fn().mockReturnValue({}),
+        buildClient: vi.fn().mockReturnValue({
+          chat: {
+            completions: {
+              create: createMock,
+            },
+          },
+          embeddings: {
+            create: vi.fn(),
+          },
+        } as unknown as OpenAI),
+        buildRequest: vi.fn().mockImplementation((req) => req),
+      };
+
+      const syncGenerator = new OpenAIContentGenerator(
+        contentGeneratorConfig,
+        mockConfig,
+        mockProvider,
+      );
+
+      const pipeline = syncGenerator['pipeline'];
+
+      const geminiResponse = {
+        candidates: [
+          {
+            content: {
+              role: 'model',
+              parts: [{ text: 'Hello' }],
+            },
+            finishReason: 'STOP',
+          },
+        ],
+      } as GenerateContentResponse;
+
+      const convertSpy = vi
+        .spyOn(pipeline['converter'], 'convertOpenAIResponseToGemini')
+        .mockReturnValue(geminiResponse);
+      const logSuccessSpy = vi
+        .spyOn(pipeline['config'].telemetryService, 'logSuccess')
+        .mockResolvedValue();
+
+      const stream = await syncGenerator.generateContentStream(
+        { model: 'gpt-4', contents: [] },
+        'prompt-id',
+      );
+
+      const chunks: GenerateContentResponse[] = [];
+      for await (const chunk of stream) {
+        chunks.push(chunk);
+      }
+
+      expect(createMock).toHaveBeenCalledTimes(1);
+      const requestArg = createMock.mock.calls[0]?.[0] ?? {};
+      expect('stream' in (requestArg as Record<string, unknown>)).toBe(false);
+      expect('stream_options' in (requestArg as Record<string, unknown>)).toBe(
+        false,
+      );
+      expect(convertSpy).toHaveBeenCalledWith(mockOpenAIResponse);
+      expect(logSuccessSpy).toHaveBeenCalled();
+      expect(chunks).toEqual([geminiResponse]);
     });
   });
 
