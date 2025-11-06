@@ -1067,6 +1067,46 @@ describe('GeminiChat', () => {
         ).toHaveBeenCalledTimes(2);
       });
 
+      it('should retry on generic connection errors', async () => {
+        const connectionError = new Error('Connection error.');
+
+        vi.mocked(mockContentGenerator.generateContentStream)
+          .mockRejectedValueOnce(connectionError)
+          .mockResolvedValueOnce(
+            (async function* () {
+              yield {
+                candidates: [
+                  {
+                    content: { parts: [{ text: 'Recovered after connection issue' }] },
+                    finishReason: 'STOP',
+                  },
+                ],
+              } as unknown as GenerateContentResponse;
+            })(),
+          );
+
+        const stream = await chat.sendMessageStream(
+          'test-model',
+          { message: 'test' },
+          'prompt-id-connection-retry',
+        );
+
+        const events: StreamEvent[] = [];
+        for await (const event of stream) {
+          events.push(event);
+        }
+
+        expect(mockContentGenerator.generateContentStream).toHaveBeenCalledTimes(2);
+        expect(
+          events.some(
+            (event) =>
+              event.type === StreamEventType.CHUNK &&
+              event.value.candidates?.[0]?.content?.parts?.[0]?.text ===
+                'Recovered after connection issue',
+          ),
+        ).toBe(true);
+      });
+
       afterEach(() => {
         // Reset to default behavior
         mockRetryWithBackoff.mockImplementation(async (apiCall) => apiCall());

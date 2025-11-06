@@ -34,6 +34,7 @@ import {
   GeminiEventType,
   Turn,
   type ChatCompressionInfo,
+  type ToolCallRequestInfo,
 } from './turn.js';
 import { getCoreSystemPrompt } from './prompts.js';
 import { DEFAULT_GEMINI_FLASH_MODEL } from '../config/models.js';
@@ -2265,6 +2266,97 @@ ${JSON.stringify(
       // Assert - loop detection methods should not be called when skipLoopDetection is true
       expect(ldMock.turnStarted).not.toHaveBeenCalled();
       expect(ldMock.addAndCheck).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('sendMessage', () => {
+    it('forwards events and runs in sync mode', async () => {
+      const emittedEvents = [
+        { type: GeminiEventType.Content, value: 'Hello sync' },
+        {
+          type: GeminiEventType.Finished,
+          value: { reason: undefined, usageMetadata: undefined },
+        },
+      ];
+
+      mockTurnRunFn.mockReturnValue(
+        (async function* () {
+          for (const event of emittedEvents) {
+            yield event;
+          }
+        })(),
+      );
+
+      const stream = client.sendMessage(
+        [{ text: 'Non streaming request' }],
+        new AbortController().signal,
+        'prompt-sync',
+      );
+
+      const events = await fromAsync(stream);
+
+      expect(events.length).toBeGreaterThanOrEqual(emittedEvents.length);
+      expect(events.slice(-emittedEvents.length)).toEqual(emittedEvents);
+      expect(mockTurnRunFn).toHaveBeenCalled();
+      const callArgs = mockTurnRunFn.mock.calls[0];
+      expect(callArgs[0]).toBe('test-model');
+      expect(callArgs[3]).toBe('sync');
+    });
+
+    it('includes tool call events in the synchronous flow', async () => {
+      const toolCall: ToolCallRequestInfo = {
+        callId: 'call-123',
+        name: 'doSomething',
+        args: { foo: 'bar' },
+        isClientInitiated: false,
+        prompt_id: 'prompt-sync',
+      };
+
+      mockTurnRunFn.mockReturnValue(
+        (async function* () {
+          yield { type: GeminiEventType.ToolCallRequest, value: toolCall };
+          yield {
+            type: GeminiEventType.Finished,
+            value: { reason: undefined, usageMetadata: undefined },
+          };
+        })(),
+      );
+
+      const stream = client.sendMessage(
+        [{ text: 'Trigger tool' }],
+        new AbortController().signal,
+        'prompt-sync',
+      );
+
+      const events = await fromAsync(stream);
+
+      expect(events).toContainEqual({
+        type: GeminiEventType.ToolCallRequest,
+        value: toolCall,
+      });
+      expect(mockTurnRunFn).toHaveBeenCalled();
+      expect(mockTurnRunFn.mock.calls[0][3]).toBe('sync');
+    });
+
+    it('propagates errors from Turn.run in sync mode', async () => {
+      mockTurnRunFn.mockImplementation(() => {
+        throw new Error('sync failure');
+      });
+
+      const stream = client.sendMessage(
+        [{ text: 'cause error' }],
+        new AbortController().signal,
+        'prompt-sync',
+      );
+
+      await expect(async () => {
+        for await (const _ of stream) {
+          // consume
+        }
+      }).rejects.toThrow('sync failure');
+
+      expect(mockTurnRunFn).toHaveBeenCalled();
+      expect(mockTurnRunFn.mock.calls[0][3]).toBe('sync');
     });
   });
 
