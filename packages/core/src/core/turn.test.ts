@@ -8,6 +8,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type {
   ServerGeminiToolCallRequestEvent,
   ServerGeminiErrorEvent,
+  ServerGeminiStreamEvent,
 } from './turn.js';
 import { Turn, GeminiEventType } from './turn.js';
 import type { GenerateContentResponse, Part, Content } from '@google/genai';
@@ -180,6 +181,172 @@ describe('Turn', () => {
       );
       expect(turn.pendingToolCalls[1]).toEqual(event2.value);
       expect(turn.getDebugResponses().length).toBe(1);
+    });
+
+    it('should convert <tool_call> text into tool call request events', async () => {
+      const mockResponseStream = (async function* () {
+        yield {
+          type: StreamEventType.CHUNK,
+          value: {
+            candidates: [
+              {
+                content: {
+                  parts: [
+                    {
+                      text: '<tool_call>{"name":"text_tool","arguments":{"foo":"bar"}}</tool_call>',
+                    },
+                  ],
+                },
+              },
+            ],
+          } as GenerateContentResponse,
+        };
+      })();
+      mockSendMessageStream.mockResolvedValue(mockResponseStream);
+
+      const events: ServerGeminiStreamEvent[] = [];
+      for await (const event of turn.run(
+        'test-model',
+        [{ text: 'Use tools' }],
+        new AbortController().signal,
+      )) {
+        events.push(event);
+      }
+
+      expect(events).toHaveLength(1);
+      const [event] = events as ServerGeminiToolCallRequestEvent[];
+      expect(event.type).toBe(GeminiEventType.ToolCallRequest);
+      expect(event.value.name).toBe('text_tool');
+      expect(event.value.args).toEqual({ foo: 'bar' });
+      expect(event.value.callId).toBeDefined();
+      expect(turn.pendingToolCalls).toHaveLength(1);
+    });
+
+    it('should handle streamed <tool_call> text across multiple chunks', async () => {
+      const mockResponseStream = (async function* () {
+        yield {
+          type: StreamEventType.CHUNK,
+          value: {
+            candidates: [
+              {
+                content: {
+                  parts: [
+                    {
+                      text: '<tool_call>{"name":"stream_tool","arguments":{"foo":',
+                    },
+                  ],
+                },
+              },
+            ],
+          } as GenerateContentResponse,
+        };
+        yield {
+          type: StreamEventType.CHUNK,
+          value: {
+            candidates: [
+              {
+                content: {
+                  parts: [
+                    {
+                      text: '"bar"}}</tool_call>',
+                    },
+                  ],
+                },
+              },
+            ],
+          } as GenerateContentResponse,
+        };
+      })();
+      mockSendMessageStream.mockResolvedValue(mockResponseStream);
+
+      const events: ServerGeminiStreamEvent[] = [];
+      for await (const event of turn.run(
+        'test-model',
+        [{ text: 'Use tools' }],
+        new AbortController().signal,
+      )) {
+        events.push(event);
+      }
+
+      expect(events).toHaveLength(1);
+      const [event] = events as ServerGeminiToolCallRequestEvent[];
+      expect(event.type).toBe(GeminiEventType.ToolCallRequest);
+      expect(event.value.name).toBe('stream_tool');
+      expect(event.value.args).toEqual({ foo: 'bar' });
+      expect(turn.pendingToolCalls).toHaveLength(1);
+    });
+
+    it('should convert tool_call message payloads with tool_calls array', async () => {
+      const toolCallMessage = {
+        role: 'assistant',
+        content:
+          'Я вижу, что в файле `@packages/core/src/core/turn.ts` в блоке `catch (e)` переменная `e` не используется, что вызывает ошибку ESLint. Поскольку по правилам проекта неиспользуемые переменные должны начинаться с подчеркивания, я исправлю это, переименовав `e` в `_e`.\n\n',
+        tool_calls: [
+          {
+            type: 'function',
+            function: {
+              name: 'edit',
+              arguments:
+                '{"file_path":"/Users/v.n.gusev/Documents/code/gusqwen/packages/core/src/core/turn.ts","old_string":"      if (signal.aborted) {\\n        yield { type: GeminiEventType.UserCancelled ;\\n        // Regular cancellation error, fail gracefully.\\n        return;\\n      }\\n\\n      const error = toFriendlyError(e);\\n      if (error instanceof UnauthorizedError) {\\n        throw error;\\n      ","new_string":"      if (signal.aborted) {\\n        yield { type: GeminiEventType.UserCancelled ;\\n        // Regular cancellation error, fail gracefully.\\n        return;\\n      }\\n\\n      const error = toFriendlyError(_e);\\n      if (error instanceof UnauthorizedError) {\\n        throw error;\\n      "}',
+            },
+          },
+        ],
+      };
+
+      const mockResponseStream = (async function* () {
+        yield {
+          type: StreamEventType.CHUNK,
+          value: {
+            candidates: [
+              {
+                content: {
+                  parts: [
+                    {
+                      text: `<tool_call>${JSON.stringify(toolCallMessage)}</tool_call>`,
+                    },
+                  ],
+                },
+              },
+            ],
+          } as GenerateContentResponse,
+        };
+      })();
+
+      mockSendMessageStream.mockResolvedValue(mockResponseStream);
+
+      const events: ServerGeminiStreamEvent[] = [];
+      for await (const event of turn.run(
+        'test-model',
+        [{ text: 'trigger tool call array' }],
+        new AbortController().signal,
+      )) {
+        events.push(event);
+      }
+
+      expect(events).toHaveLength(2);
+
+      const toolCallEvent = events[0] as ServerGeminiToolCallRequestEvent;
+      expect(toolCallEvent.type).toBe(GeminiEventType.ToolCallRequest);
+      expect(toolCallEvent.value.name).toBe('edit');
+      expect(toolCallEvent.value.args).toEqual({
+        file_path:
+          '/Users/v.n.gusev/Documents/code/gusqwen/packages/core/src/core/turn.ts',
+        old_string:
+          '      if (signal.aborted) {\n        yield { type: GeminiEventType.UserCancelled ;\n        // Regular cancellation error, fail gracefully.\n        return;\n      }\n\n      const error = toFriendlyError(e);\n      if (error instanceof UnauthorizedError) {\n        throw error;\n      ',
+        new_string:
+          '      if (signal.aborted) {\n        yield { type: GeminiEventType.UserCancelled ;\n        // Regular cancellation error, fail gracefully.\n        return;\n      }\n\n      const error = toFriendlyError(_e);\n      if (error instanceof UnauthorizedError) {\n        throw error;\n      ',
+      });
+      expect(toolCallEvent.value.callId).toMatch(/^edit-\d{13}-[0-9a-f]+$/);
+
+      const contentEvent = events[1];
+      expect(contentEvent).toEqual({
+        type: GeminiEventType.Content,
+        value:
+          'Я вижу, что в файле `@packages/core/src/core/turn.ts` в блоке `catch (e)` переменная `e` не используется, что вызывает ошибку ESLint. Поскольку по правилам проекта неиспользуемые переменные должны начинаться с подчеркивания, я исправлю это, переименовав `e` в `_e`.\n\n',
+      });
+
+      expect(turn.pendingToolCalls).toHaveLength(1);
+      expect(turn.pendingToolCalls[0]).toEqual(toolCallEvent.value);
     });
 
     it('should yield UserCancelled event if signal is aborted', async () => {

@@ -218,6 +218,7 @@ export class Turn {
   private pendingCitations = new Set<string>();
   finishReason: FinishReason | undefined = undefined;
   private currentResponseId?: string;
+  private toolCallTextBuffer: string | null = null;
 
   constructor(
     private readonly chat: GeminiChat,
@@ -278,7 +279,15 @@ export class Turn {
 
         const text = getResponseText(resp);
         if (text) {
-          yield { type: GeminiEventType.Content, value: text };
+          const { events: toolCallEvents, content } = this.processToolCallText(
+            text,
+          );
+          for (const event of toolCallEvents) {
+            yield event;
+          }
+          if (content) {
+            yield { type: GeminiEventType.Content, value: content };
+          }
         }
 
         // Handle function calls (requesting tool execution)
@@ -317,14 +326,14 @@ export class Turn {
           };
         }
       }
-    } catch (e) {
+    } catch (_e) {
       if (signal.aborted) {
         yield { type: GeminiEventType.UserCancelled };
         // Regular cancellation error, fail gracefully.
         return;
       }
 
-      const error = toFriendlyError(e);
+      const error = toFriendlyError(_e);
       if (error instanceof UnauthorizedError) {
         throw error;
       }
@@ -351,6 +360,188 @@ export class Turn {
       yield { type: GeminiEventType.Error, value: { error: structuredError } };
       return;
     }
+  }
+
+  private processToolCallText(
+    text: string,
+  ): { events: ServerGeminiStreamEvent[]; content: string } {
+    const toolCallEvents: ServerGeminiStreamEvent[] = [];
+    let content = '';
+    let index = 0;
+    const openTag = '<tool_call>';
+    const closeTag = '</tool_call>';
+
+    while (index < text.length) {
+      if (this.toolCallTextBuffer !== null) {
+        const closeIndex = text.indexOf(closeTag, index);
+        if (closeIndex === -1) {
+          this.toolCallTextBuffer += text.slice(index);
+          index = text.length;
+          break;
+        }
+
+        this.toolCallTextBuffer += text.slice(index, closeIndex);
+        const result = this.createToolCallEventsFromJson(
+          this.toolCallTextBuffer.trim(),
+        );
+        if (result) {
+          toolCallEvents.push(...result.events);
+          if (result.fallbackContent) {
+            content += result.fallbackContent;
+          }
+        } else {
+          content += `${openTag}${this.toolCallTextBuffer}${closeTag}`;
+        }
+        this.toolCallTextBuffer = null;
+        index = closeIndex + closeTag.length;
+        continue;
+      }
+
+      const openIndex = text.indexOf(openTag, index);
+      if (openIndex === -1) {
+        content += text.slice(index);
+        break;
+      }
+
+      content += text.slice(index, openIndex);
+      index = openIndex + openTag.length;
+
+      const closeIndex = text.indexOf(closeTag, index);
+      if (closeIndex === -1) {
+        this.toolCallTextBuffer = text.slice(index);
+        index = text.length;
+        break;
+      }
+
+      const payload = text.slice(index, closeIndex);
+      const result = this.createToolCallEventsFromJson(payload.trim());
+      if (result) {
+        toolCallEvents.push(...result.events);
+        if (result.fallbackContent) {
+          content += result.fallbackContent;
+        }
+      } else {
+        content += `${openTag}${payload}${closeTag}`;
+      }
+      index = closeIndex + closeTag.length;
+    }
+
+    return { events: toolCallEvents, content };
+  }
+
+  private createToolCallEventsFromJson(
+    jsonPayload: string,
+  ):
+    | { events: ServerGeminiStreamEvent[]; fallbackContent: string }
+    | null {
+    if (!jsonPayload) {
+      return null;
+    }
+
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(jsonPayload);
+    } catch (error) {
+      return null;
+    }
+
+    if (!parsed || typeof parsed !== 'object') {
+      return null;
+    }
+
+    const candidate = parsed as Record<string, unknown>;
+
+    const fallbackContent =
+      typeof candidate['content'] === 'string' ? candidate['content'] : '';
+
+    const events: ServerGeminiStreamEvent[] = [];
+
+    const toolCalls = Array.isArray(candidate['tool_calls'])
+      ? (candidate['tool_calls'] as unknown[])
+      : null;
+
+    if (toolCalls) {
+      for (const toolCall of toolCalls) {
+        if (toolCall && typeof toolCall === 'object') {
+          const fnCall = this.createFunctionCallFromCandidate(
+            toolCall as Record<string, unknown>,
+          );
+          if (fnCall) {
+            const event = this.handlePendingFunctionCall(fnCall);
+            if (event) {
+              events.push(event);
+            }
+          }
+        }
+      }
+    }
+
+    if (events.length === 0) {
+      const fnCall = this.createFunctionCallFromCandidate(candidate);
+      if (fnCall) {
+        const event = this.handlePendingFunctionCall(fnCall);
+        if (event) {
+          events.push(event);
+        }
+      }
+    }
+
+    if (events.length === 0) {
+      return null;
+    }
+
+    return { events, fallbackContent };
+  }
+
+  private createFunctionCallFromCandidate(
+    candidate: Record<string, unknown>,
+  ): FunctionCall | null {
+    const functionDataRaw = candidate['function'];
+    const functionData =
+      functionDataRaw && typeof functionDataRaw === 'object'
+        ? (functionDataRaw as Record<string, unknown>)
+        : undefined;
+
+    const nameCandidate =
+      candidate['name'] ?? functionData?.['name'];
+    const idCandidate =
+      candidate['id'] ??
+      candidate['callId'] ??
+      candidate['call_id'] ??
+      candidate['tool_call_id'] ??
+      functionData?.['id'];
+
+    const argsCandidate =
+      candidate['arguments'] ??
+      candidate['args'] ??
+      functionData?.['arguments'];
+
+    if (typeof nameCandidate !== 'string' || nameCandidate.length === 0) {
+      return null;
+    }
+
+    let args: Record<string, unknown> = {};
+    if (typeof argsCandidate === 'string') {
+      const trimmedArgs = argsCandidate.trim();
+      if (trimmedArgs) {
+        try {
+          const parsedArgs = JSON.parse(trimmedArgs);
+          if (parsedArgs && typeof parsedArgs === 'object') {
+            args = parsedArgs as Record<string, unknown>;
+          }
+        } catch (error) {
+          return null;
+        }
+      }
+    } else if (argsCandidate && typeof argsCandidate === 'object') {
+      args = argsCandidate as Record<string, unknown>;
+    }
+
+    return {
+      id: typeof idCandidate === 'string' ? idCandidate : undefined,
+      name: nameCandidate,
+      args,
+    } as FunctionCall;
   }
 
   private handlePendingFunctionCall(
