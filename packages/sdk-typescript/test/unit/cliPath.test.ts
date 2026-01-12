@@ -151,10 +151,10 @@ describe('CLI Path Utilities', () => {
       });
 
       it('should detect command names on Windows', () => {
-        const result = parseExecutableSpec('qwen.exe');
+        const result = parseExecutableSpec('gusqwen.exe');
 
         expect(result).toEqual({
-          executablePath: 'qwen.exe',
+          executablePath: 'gusqwen.exe',
           isExplicitRuntime: false,
         });
       });
@@ -408,7 +408,7 @@ describe('CLI Path Utilities', () => {
     });
 
     it('should handle development with TypeScript source', () => {
-      const devPath = '/Users/dev/qwen-code/packages/cli/index.ts';
+      const devPath = '/Users/dev/gusqwen/packages/cli/index.ts';
       const result = prepareSpawnInfo(devPath);
 
       expect(result).toEqual({
@@ -559,9 +559,9 @@ describe('CLI Path Utilities', () => {
 
       it('should accept valid command names', () => {
         expect(() => parseExecutableSpec('qwen')).not.toThrow();
-        expect(() => parseExecutableSpec('qwen-code')).not.toThrow();
+        expect(() => parseExecutableSpec('gusqwen')).not.toThrow();
         expect(() => parseExecutableSpec('qwen_code')).not.toThrow();
-        expect(() => parseExecutableSpec('qwen.exe')).not.toThrow();
+        expect(() => parseExecutableSpec('gusqwen.exe')).not.toThrow();
         expect(() => parseExecutableSpec('qwen123')).not.toThrow();
       });
     });

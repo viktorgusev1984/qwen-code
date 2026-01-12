@@ -1,6 +1,6 @@
 /**
  * @license
- * Copyright 2025 Qwen Team
+ * Copyright 2025 Gus Qwen Team
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -12,12 +12,12 @@ import type {
   ToolCallRequestInfo,
   ToolCallResponseInfo,
   SessionMetrics,
-} from '@qwen-code/qwen-code-core';
+} from '@psd-tech/gusqwen-core';
 import {
   OutputFormat,
   ToolErrorType,
   getMCPServerStatus,
-} from '@qwen-code/qwen-code-core';
+} from '@psd-tech/gusqwen-core';
 import type { Part, PartListUnion } from '@google/genai';
 import type {
   CLIUserMessage,

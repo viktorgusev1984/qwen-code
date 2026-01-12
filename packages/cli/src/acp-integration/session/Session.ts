@@ -10,18 +10,19 @@ import type {
   GenerateContentResponseUsageMetadata,
   Part,
 } from '@google/genai';
-import type {
-  Config,
-  GeminiChat,
-  ToolCallConfirmationDetails,
-  ToolResult,
-  ChatRecord,
-  SubAgentEventEmitter,
-} from '@qwen-code/qwen-code-core';
 import {
+  ChatCompressionService,
+  CompressionStatus
+,
   ApprovalMode,
   convertToFunctionResponse,
   DiscoveredMCPTool,
+  addMCPStatusChangeListener,
+  getMCPDiscoveryState,
+  getMCPServerStatus,
+  MCPDiscoveryState,
+  MCPServerStatus,
+  MCPOAuthTokenStorage,
   StreamEventType,
   ToolConfirmationOutcome,
   logToolCall,
@@ -29,22 +30,35 @@ import {
   getErrorStatus,
   isWithinRoot,
   isNodeError,
+  ThoughtStreamParser,
+  ToolCallStreamParser,
   TaskTool,
   UserPromptEvent,
   TodoWriteTool,
   ExitPlanModeTool,
-} from '@qwen-code/qwen-code-core';
+  uiTelemetryService,
+  Logger,
+} from '@psd-tech/gusqwen-core';
+import type {
+  ToolCallConfirmationDetails,
+  ToolResult,
+  ChatRecord,
+  StreamEvent,
+  ChatCompressionInfo,
+
+  Config,
+  GeminiChat,
+  SubAgentEventEmitter} from '@psd-tech/gusqwen-core';
 
 import * as acp from '../acp.js';
 import type { LoadedSettings } from '../../config/settings.js';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { z } from 'zod';
+import type { ReactElement, ReactNode } from 'react';
+import { isValidElement } from 'react';
 import { getErrorMessage } from '../../utils/errors.js';
-import {
-  handleSlashCommand,
-  getAvailableCommands,
-} from '../../nonInteractiveCliCommands.js';
+import { getAvailableCommands } from '../../nonInteractiveCliCommands.js';
 import type {
   AvailableCommand,
   AvailableCommandsUpdate,
@@ -54,6 +68,26 @@ import type {
   CurrentModeUpdate,
 } from '../schema.js';
 import { isSlashCommand } from '../../ui/utils/commandUtils.js';
+import type { CommandContext, SlashCommand } from '../../ui/commands/types.js';
+import { parseSlashCommand } from '../../utils/commands.js';
+import { createNonInteractiveUI } from '../../ui/noninteractive/nonInteractiveUi.js';
+import type {
+  HistoryItemAbout,
+  HistoryItemHelp,
+  HistoryItemMcpStatus,
+  HistoryItemQuit,
+  HistoryItemStats,
+  HistoryItemSummary,
+  HistoryItemToolsList,
+  HistoryItemWithoutId,
+} from '../../ui/types.js';
+import type { SessionStatsState } from '../../ui/contexts/SessionContext.js';
+import { normalizePartList } from '../../utils/nonInteractiveHelpers.js';
+import {
+  getFieldValue,
+  getSystemInfoFields,
+} from '../../utils/systemInfoFields.js';
+import { t } from '../../i18n/index.js';
 
 // Import modular session components
 import type { SessionContext, ToolCallStartParams } from './types.js';
@@ -67,7 +101,32 @@ import { SubAgentTracker } from './SubAgentTracker.js';
  * Built-in commands that are allowed in ACP integration mode.
  * Only safe, read-only commands that don't require interactive UI.
  */
-export const ALLOWED_BUILTIN_COMMANDS_FOR_ACP = ['init'];
+export const ALLOWED_BUILTIN_COMMANDS_FOR_ACP = [
+  'init',
+  'login',
+  'help',
+  'clear',
+  'model',
+  'theme',
+  'vim',
+  'directory',
+  'editor',
+  'language',
+  'mcp',
+  'tools',
+  'extensions',
+  'memory',
+  'stats',
+  'summary',
+  'compress',
+  'summarize',
+  'about',
+  'auth',
+  'bug',
+  'copy',
+  'quit-confirm',
+  'quit',
+];
 
 /**
  * Session represents an active conversation session with the AI model.
@@ -80,19 +139,31 @@ export const ALLOWED_BUILTIN_COMMANDS_FOR_ACP = ['init'];
 export class Session implements SessionContext {
   private pendingPrompt: AbortController | null = null;
   private turn: number = 0;
+  private hasFailedCompressionAttempt = false;
+  private mcpCommandsUpdateTimer: ReturnType<typeof setTimeout> | null = null;
+  private readonly pendingConfirmations = new Map<
+    string,
+    ReturnType<typeof setTimeout>
+  >();
+  private readonly mcpStatusListener?: (
+    serverName: string,
+    status: MCPServerStatus,
+  ) => void;
 
   // Modular components
   private readonly historyReplayer: HistoryReplayer;
   private readonly toolCallEmitter: ToolCallEmitter;
   private readonly planEmitter: PlanEmitter;
   private readonly messageEmitter: MessageEmitter;
+  private readonly toolCallTextParser = new ToolCallStreamParser();
+  private readonly thoughtTextParser = new ThoughtStreamParser();
 
   // Implement SessionContext interface
   readonly sessionId: string;
 
   constructor(
     id: string,
-    private readonly chat: GeminiChat,
+    private chat: GeminiChat,
     readonly config: Config,
     private readonly client: acp.Client,
     private readonly settings: LoadedSettings,
@@ -104,10 +175,33 @@ export class Session implements SessionContext {
     this.planEmitter = new PlanEmitter(this);
     this.historyReplayer = new HistoryReplayer(this);
     this.messageEmitter = new MessageEmitter(this);
+
+    const mcpServers = this.config.getMcpServers() || {};
+    if (Object.keys(mcpServers).length > 0) {
+      this.mcpStatusListener = (_serverName, status) => {
+        if (
+          status === MCPServerStatus.CONNECTED ||
+          status === MCPServerStatus.DISCONNECTED
+        ) {
+          this.scheduleAvailableCommandsUpdate();
+        }
+      };
+      addMCPStatusChangeListener(this.mcpStatusListener);
+    }
   }
 
   getId(): string {
     return this.sessionId;
+  }
+
+  private scheduleAvailableCommandsUpdate(): void {
+    if (this.mcpCommandsUpdateTimer) {
+      return;
+    }
+    this.mcpCommandsUpdateTimer = setTimeout(() => {
+      this.mcpCommandsUpdateTimer = null;
+      void this.sendAvailableCommandsUpdate();
+    }, 100);
   }
 
   getConfig(): Config {
@@ -131,6 +225,52 @@ export class Session implements SessionContext {
     this.pendingPrompt = null;
   }
 
+  private async tryCompressChat(
+    promptId: string,
+    force: boolean = false,
+  ): Promise<ChatCompressionInfo> {
+    const compressionService = new ChatCompressionService();
+
+    const { newHistory, info } = await compressionService.compress(
+      this.chat,
+      promptId,
+      force,
+      this.config.getModel(),
+      this.config,
+      this.hasFailedCompressionAttempt,
+    );
+
+    if (info.compressionStatus === CompressionStatus.COMPRESSED) {
+      if (newHistory) {
+        const chatRecordingService = this.config.getChatRecordingService();
+        chatRecordingService?.recordChatCompression({
+          info,
+          compressedHistory: newHistory,
+        });
+
+        const geminiClient = this.config.getGeminiClient();
+        this.chat = await geminiClient.startChat(newHistory);
+        uiTelemetryService.setLastPromptTokenCount(info.newTokenCount);
+        await this.messageEmitter.emitChatCompression({
+          originalTokenCount: info.originalTokenCount,
+          newTokenCount: info.newTokenCount,
+          trigger: force ? 'manual' : 'auto',
+        });
+      }
+    } else if (
+      info.compressionStatus ===
+        CompressionStatus.COMPRESSION_FAILED_INFLATED_TOKEN_COUNT ||
+      info.compressionStatus ===
+        CompressionStatus.COMPRESSION_FAILED_EMPTY_SUMMARY
+    ) {
+      if (!force) {
+        this.hasFailedCompressionAttempt = true;
+      }
+    }
+
+    return info;
+  }
+
   async prompt(params: acp.PromptRequest): Promise<acp.PromptResponse> {
     this.pendingPrompt?.abort();
     const pendingSend = new AbortController();
@@ -139,7 +279,6 @@ export class Session implements SessionContext {
     // Increment turn counter for each user prompt
     this.turn += 1;
 
-    const chat = this.chat;
     const promptId = this.config.getSessionId() + '########' + this.turn;
 
     // Extract text from all text blocks to construct the full prompt text for logging
@@ -170,20 +309,19 @@ export class Session implements SessionContext {
     let parts: Part[];
 
     if (isSlashCommand(inputText)) {
-      // Handle slash command - allow specific built-in commands for ACP integration
-      const slashCommandResult = await handleSlashCommand(
+      const slashCommandResult = await this.handleSlashCommandForAcp(
         inputText,
-        pendingSend,
-        this.config,
-        this.settings,
-        ALLOWED_BUILTIN_COMMANDS_FOR_ACP,
+        pendingSend.signal,
+        promptId,
       );
 
-      if (slashCommandResult) {
-        // Use the result from the slash command
-        parts = slashCommandResult as Part[];
+      if (slashCommandResult.handled) {
+        if (slashCommandResult.parts) {
+          parts = slashCommandResult.parts;
+        } else {
+          return { stopReason: 'end_turn' };
+        }
       } else {
-        // Slash command didn't return a prompt, continue with normal processing
         parts = await this.#resolvePrompt(params.prompt, pendingSend.signal);
       }
     } else {
@@ -191,6 +329,8 @@ export class Session implements SessionContext {
       parts = await this.#resolvePrompt(params.prompt, pendingSend.signal);
     }
 
+    await this.tryCompressChat(promptId, false);
+    const chat = this.chat;
     let nextMessage: Content | null = { role: 'user', parts };
 
     while (nextMessage !== null) {
@@ -199,21 +339,48 @@ export class Session implements SessionContext {
         return { stopReason: 'cancelled' };
       }
 
+      this.toolCallTextParser.reset();
+      this.thoughtTextParser.reset();
+
       const functionCalls: FunctionCall[] = [];
       let usageMetadata: GenerateContentResponseUsageMetadata | null = null;
       const streamStartTime = Date.now();
 
       try {
-        const responseStream = await chat.sendMessageStream(
-          this.config.getModel(),
-          {
-            message: nextMessage?.parts ?? [],
-            config: {
-              abortSignal: pendingSend.signal,
+        const shouldStream = this.config.shouldStreamResponses();
+        let responseStream: AsyncGenerator<StreamEvent>;
+
+        if (shouldStream) {
+          responseStream = await chat.sendMessageStream(
+            this.config.getModel(),
+            {
+              message: nextMessage?.parts ?? [],
+              config: {
+                abortSignal: pendingSend.signal,
+              },
             },
-          },
-          promptId,
-        );
+            promptId,
+          );
+        } else {
+          const response = await chat.sendMessage(
+            this.config.getModel(),
+            {
+              message: nextMessage?.parts ?? [],
+              config: {
+                abortSignal: pendingSend.signal,
+              },
+            },
+            promptId,
+          );
+          const pendingEvents = chat.drainPendingSyncStreamEvents();
+          responseStream = (async function* (): AsyncGenerator<StreamEvent> {
+            for (const pendingEvent of pendingEvents) {
+              yield pendingEvent;
+            }
+            yield { type: StreamEventType.CHUNK, value: response };
+          })();
+        }
+
         nextMessage = null;
 
         for await (const resp of responseStream) {
@@ -227,16 +394,47 @@ export class Session implements SessionContext {
             resp.value.candidates.length > 0
           ) {
             const candidate = resp.value.candidates[0];
+            const hasNativeCalls = (resp.value.functionCalls ?? []).length > 0;
             for (const part of candidate.content?.parts ?? []) {
               if (!part.text) {
                 continue;
               }
 
-              this.messageEmitter.emitMessage(
-                part.text,
-                'assistant',
-                part.thought,
-              );
+              if (part.thought) {
+                this.messageEmitter.emitMessage(part.text, 'assistant', true);
+                continue;
+              }
+
+              const { thoughts, visibleText } =
+                this.thoughtTextParser.parseChunk(part.text);
+
+              for (const rawThought of thoughts) {
+                this.messageEmitter.emitMessage(rawThought, 'assistant', true);
+              }
+
+              if (!visibleText) {
+                continue;
+              }
+
+              if (hasNativeCalls) {
+                this.messageEmitter.emitMessage(
+                  visibleText,
+                  'assistant',
+                  false,
+                );
+                continue;
+              }
+
+              const { functionCalls: parsedCalls, content } =
+                this.toolCallTextParser.parseChunk(visibleText);
+
+              if (content) {
+                this.messageEmitter.emitMessage(content, 'assistant', false);
+              }
+
+              if (parsedCalls.length) {
+                functionCalls.push(...parsedCalls);
+              }
             }
           }
 
@@ -257,6 +455,24 @@ export class Session implements SessionContext {
         }
 
         throw error;
+      }
+
+      const { functionCalls: tailCalls, content: tailContent } =
+        this.toolCallTextParser.flush();
+      if (tailContent) {
+        this.messageEmitter.emitMessage(tailContent, 'assistant', false);
+      }
+      if (tailCalls.length) {
+        functionCalls.push(...tailCalls);
+      }
+
+      const { thoughts: tailThoughts, visibleText: tailThoughtText } =
+        this.thoughtTextParser.flush();
+      for (const rawThought of tailThoughts) {
+        this.messageEmitter.emitMessage(rawThought, 'assistant', true);
+      }
+      if (tailThoughtText) {
+        this.messageEmitter.emitMessage(tailThoughtText, 'assistant', false);
       }
 
       if (usageMetadata) {
@@ -283,6 +499,664 @@ export class Session implements SessionContext {
     return { stopReason: 'end_turn' };
   }
 
+  private async handleSlashCommandForAcp(
+    rawQuery: string,
+    abortSignal: AbortSignal,
+    promptId: string,
+  ): Promise<{ handled: boolean; parts?: Part[] }> {
+    const trimmed = rawQuery.trim();
+    if (!trimmed.startsWith('/')) {
+      return { handled: false };
+    }
+
+    const overwriteConfirmed = this.consumePendingConfirmation(trimmed);
+
+    const commands = await getAvailableCommands(
+      this.config,
+      this.settings,
+      abortSignal,
+      ALLOWED_BUILTIN_COMMANDS_FOR_ACP,
+    );
+    const { commandToExecute, args, canonicalPath } = parseSlashCommand(
+      trimmed,
+      commands,
+    );
+
+    if (!commandToExecute || !commandToExecute.action) {
+      return { handled: false };
+    }
+
+    if (commandToExecute.name === 'compress') {
+      const compressed = await this.tryCompressChat(promptId, true);
+      if (compressed.compressionStatus !== CompressionStatus.COMPRESSED) {
+        let message = t('Failed to compress chat history.');
+        if (compressed.compressionStatus === CompressionStatus.NOOP) {
+          message = t('Compression was not necessary for this session.');
+        } else if (
+          compressed.compressionStatus ===
+          CompressionStatus.COMPRESSION_FAILED_INFLATED_TOKEN_COUNT
+        ) {
+          message = t('Chat history compression did not reduce size.');
+        } else if (
+          compressed.compressionStatus ===
+          CompressionStatus.COMPRESSION_FAILED_EMPTY_SUMMARY
+        ) {
+          message = t('Chat history compression produced an empty summary.');
+        }
+        await this.messageEmitter.emitAgentMessage(message);
+      }
+      return { handled: true };
+    }
+
+    const recordedItems: HistoryItemWithoutId[] = [];
+    const ui = createNonInteractiveUI();
+    const addItemWithRecording: CommandContext['ui']['addItem'] = (
+      item,
+      _timestamp,
+    ) => {
+      recordedItems.push(item as HistoryItemWithoutId);
+      return 0;
+    };
+
+    const sessionStats: SessionStatsState = {
+      sessionId: this.config?.getSessionId?.() ?? '',
+      sessionStartTime: new Date(),
+      metrics: uiTelemetryService.getMetrics(),
+      lastPromptTokenCount: 0,
+      promptCount: 1,
+    };
+
+    const logger = new Logger(
+      this.config?.getSessionId?.() ?? '',
+      this.config?.storage,
+    );
+
+    const context: CommandContext = {
+      services: {
+        config: this.config,
+        settings: this.settings,
+        git: undefined,
+        logger,
+      },
+      ui: {
+        ...ui,
+        addItem: addItemWithRecording,
+      },
+      session: {
+        stats: sessionStats,
+        sessionShellAllowlist: new Set(),
+      },
+      overwriteConfirmed: overwriteConfirmed || undefined,
+      invocation: {
+        raw: trimmed,
+        name: commandToExecute.name,
+        args,
+      },
+    };
+
+    const result = await commandToExecute.action(context, args);
+
+    const isMcpCommand = canonicalPath[0] === 'mcp';
+    if (isMcpCommand) {
+      const hasMcpStatus = recordedItems.some(
+        (item) => item.type === 'mcp_status',
+      );
+      if (!hasMcpStatus) {
+        const mcpStatusItem = await this.buildMcpStatusItem(args);
+        if (mcpStatusItem) {
+          recordedItems.push(mcpStatusItem);
+        }
+      }
+    }
+
+    if (recordedItems.length > 0) {
+      for (const item of recordedItems) {
+        const formatted = this.formatHistoryItemForAcp(item, commands);
+        if (formatted && formatted.trim().length > 0) {
+          await this.messageEmitter.emitAgentMessage(formatted);
+        }
+      }
+    }
+
+    if (result) {
+      switch (result.type) {
+        case 'submit_prompt':
+          return {
+            handled: true,
+            parts: normalizePartList(result.content),
+          };
+        case 'message': {
+          const message = result.content?.trim();
+          if (message) {
+            await this.messageEmitter.emitAgentMessage(message);
+          }
+          return { handled: true };
+        }
+        case 'tool': {
+          await this.runTool(abortSignal, promptId, {
+            name: result.toolName,
+            args: result.toolArgs,
+            id: `${result.toolName}-${Date.now()}`,
+          });
+          return { handled: true };
+        }
+        case 'confirm_action': {
+          const prompt = this.extractPromptText(result.prompt);
+          this.markPendingConfirmation(result.originalInvocation.raw);
+          await this.messageEmitter.emitConfirmAction({
+            prompt,
+            originalInvocation: result.originalInvocation,
+          });
+          return { handled: true };
+        }
+        default: {
+          await this.messageEmitter.emitAgentMessage(
+            'This command is not supported in the IDE yet.',
+          );
+          return { handled: true };
+        }
+      }
+    }
+
+    return { handled: recordedItems.length > 0 };
+  }
+
+  private markPendingConfirmation(raw: string): void {
+    const key = raw.trim();
+    if (!key) return;
+    const existing = this.pendingConfirmations.get(key);
+    if (existing) {
+      clearTimeout(existing);
+    }
+    const timeout = setTimeout(() => {
+      this.pendingConfirmations.delete(key);
+    }, 60_000);
+    this.pendingConfirmations.set(key, timeout);
+  }
+
+  private consumePendingConfirmation(raw: string): boolean {
+    const key = raw.trim();
+    const timeout = this.pendingConfirmations.get(key);
+    if (!timeout) return false;
+    clearTimeout(timeout);
+    this.pendingConfirmations.delete(key);
+    return true;
+  }
+
+  private extractPromptText(prompt: ReactNode): string {
+    const chunks: string[] = [];
+    const visit = (node: ReactNode): void => {
+      if (node === null || node === undefined || typeof node === 'boolean') {
+        return;
+      }
+      if (typeof node === 'string' || typeof node === 'number') {
+        chunks.push(String(node));
+        return;
+      }
+      if (Array.isArray(node)) {
+        node.forEach(visit);
+        return;
+      }
+      if (isValidElement(node)) {
+        const element = node as ReactElement<{ children?: ReactNode }>;
+        visit(element.props.children);
+      }
+    };
+    visit(prompt);
+    const text = chunks.join('').trim();
+    return text.length > 0
+      ? text
+      : t('This action requires confirmation. Proceed?');
+  }
+
+  private formatHistoryItemForAcp(
+    item: HistoryItemWithoutId,
+    commands: readonly SlashCommand[],
+  ): string | null {
+    if (typeof item.text === 'string' && item.text.trim().length > 0) {
+      return item.text;
+    }
+
+    switch (item.type) {
+      case 'tools_list':
+        return this.formatToolsList(item);
+      case 'extensions_list':
+        return this.formatExtensionsList();
+      case 'help':
+        return this.formatHelp(commands, item);
+      case 'about':
+        return this.formatAbout(item);
+      case 'stats':
+        return this.formatStats(item);
+      case 'model_stats':
+        return t('Model stats are not available in the IDE yet.');
+      case 'tool_stats':
+        return t('Tool stats are not available in the IDE yet.');
+      case 'summary': {
+        return this.formatSummary(item);
+      }
+      case 'mcp_status':
+        return this.formatMcpStatus(item);
+      case 'quit':
+        return this.formatQuit(item);
+      default:
+        return null;
+    }
+  }
+
+  private formatToolsList(item: HistoryItemToolsList): string {
+    const lines: string[] = [t('Available Gus Qwen CLI tools:'), ''];
+
+    if (item.tools.length === 0) {
+      lines.push(t('No tools available'));
+      return lines.join('\n');
+    }
+
+    for (const tool of item.tools) {
+      const label = item.showDescriptions
+        ? `${tool.displayName} (${tool.name})`
+        : tool.displayName;
+      lines.push(`  - ${label}`);
+      if (item.showDescriptions && tool.description) {
+        for (const line of tool.description.split('\n')) {
+          lines.push(`    ${line}`);
+        }
+      }
+    }
+
+    return lines.join('\n');
+  }
+
+  private async buildMcpStatusItem(
+    args: string,
+  ): Promise<HistoryItemMcpStatus | null> {
+    if (!this.config) {
+      return null;
+    }
+
+    const toolRegistry = this.config.getToolRegistry();
+    if (!toolRegistry) {
+      return null;
+    }
+
+    const lowerCaseArgs = args.toLowerCase().split(/\s+/).filter(Boolean);
+    const hasDesc =
+      lowerCaseArgs.includes('desc') || lowerCaseArgs.includes('descriptions');
+    const hasNodesc =
+      lowerCaseArgs.includes('nodesc') ||
+      lowerCaseArgs.includes('nodescriptions');
+    const showSchema = lowerCaseArgs.includes('schema');
+    const showDescriptions = !hasNodesc && (hasDesc || showSchema);
+    const showTips = lowerCaseArgs.length === 0;
+
+    const mcpServers = this.config.getMcpServers() || {};
+    const serverNames = Object.keys(mcpServers);
+    const blockedMcpServers = this.config.getBlockedMcpServers() || [];
+
+    const connectingServers = serverNames.filter(
+      (name) => getMCPServerStatus(name) === MCPServerStatus.CONNECTING,
+    );
+    const discoveryState = getMCPDiscoveryState();
+    const discoveryInProgress =
+      discoveryState === MCPDiscoveryState.IN_PROGRESS ||
+      connectingServers.length > 0;
+
+    const allTools = toolRegistry.getAllTools();
+    const mcpTools = allTools.filter(
+      (tool) => tool instanceof DiscoveredMCPTool,
+    ) as DiscoveredMCPTool[];
+
+    const promptRegistry = await this.config.getPromptRegistry();
+    const mcpPrompts = promptRegistry
+      .getAllPrompts()
+      .filter(
+        (prompt) =>
+          'serverName' in prompt &&
+          serverNames.includes(prompt.serverName as string),
+      ) as Array<{
+      serverName: string;
+      name: string;
+      description?: string;
+    }>;
+
+    const authStatus: HistoryItemMcpStatus['authStatus'] = {};
+    const tokenStorage = new MCPOAuthTokenStorage();
+    for (const serverName of serverNames) {
+      const server = mcpServers[serverName];
+      if (server.oauth?.enabled) {
+        const creds = await tokenStorage.getCredentials(serverName);
+        if (creds) {
+          if (creds.token.expiresAt && creds.token.expiresAt < Date.now()) {
+            authStatus[serverName] = 'expired';
+          } else {
+            authStatus[serverName] = 'authenticated';
+          }
+        } else {
+          authStatus[serverName] = 'unauthenticated';
+        }
+      } else {
+        authStatus[serverName] = 'not-configured';
+      }
+    }
+
+    return {
+      type: 'mcp_status',
+      servers: mcpServers,
+      tools: mcpTools.map((tool) => ({
+        serverName: tool.serverName,
+        name: tool.name,
+        description: tool.description,
+        schema: tool.schema,
+      })),
+      prompts: mcpPrompts.map((prompt) => ({
+        serverName: prompt.serverName,
+        name: prompt.name,
+        description: prompt.description,
+      })),
+      authStatus,
+      blockedServers: blockedMcpServers,
+      discoveryInProgress,
+      connectingServers,
+      showDescriptions,
+      showSchema,
+      showTips,
+    };
+  }
+
+  private formatMcpStatus(item: HistoryItemMcpStatus): string {
+    const lines: string[] = [];
+    const serverNames = Object.keys(item.servers);
+
+    if (serverNames.length === 0 && item.blockedServers.length === 0) {
+      lines.push(t('No MCP servers configured.'));
+      lines.push(
+        `${t('Please view MCP documentation in your browser:')} https://goo.gle/gemini-cli-docs-mcp ${t('or use the cli /docs command')}`,
+      );
+      return lines.join('\n');
+    }
+
+    if (item.discoveryInProgress) {
+      lines.push(
+        t('⏳ MCP servers are starting up ({{count}} initializing)...', {
+          count: String(item.connectingServers.length),
+        }),
+      );
+      lines.push(
+        t(
+          'Note: First startup may take longer. Tool availability will update automatically.',
+        ),
+      );
+      lines.push('');
+    }
+
+    lines.push(t('Configured MCP servers:'));
+    lines.push('');
+
+    for (const serverName of serverNames) {
+      const server = item.servers[serverName];
+      const serverTools = item.tools.filter(
+        (tool) => tool.serverName === serverName,
+      );
+      const serverPrompts = item.prompts.filter(
+        (prompt) => prompt.serverName === serverName,
+      );
+
+      const originalStatus = getMCPServerStatus(serverName);
+      const hasCachedItems = serverTools.length > 0 || serverPrompts.length > 0;
+      const status =
+        originalStatus === MCPServerStatus.DISCONNECTED && hasCachedItems
+          ? MCPServerStatus.CONNECTED
+          : originalStatus;
+
+      let statusText = '';
+      switch (status) {
+        case MCPServerStatus.CONNECTED:
+          statusText = t('Ready');
+          break;
+        case MCPServerStatus.CONNECTING:
+          statusText = t('Starting... (first startup may take longer)');
+          break;
+        case MCPServerStatus.DISCONNECTED:
+        default:
+          statusText = t('Disconnected');
+          break;
+      }
+
+      let serverDisplayName = serverName;
+      if (server.extensionName) {
+        serverDisplayName += ` ${t('(from {{extensionName}})', {
+          extensionName: server.extensionName,
+        })}`;
+      }
+
+      const toolCount = serverTools.length;
+      const promptCount = serverPrompts.length;
+      const parts: string[] = [];
+      if (toolCount > 0) {
+        parts.push(
+          toolCount === 1
+            ? t('{{count}} tool', { count: String(toolCount) })
+            : t('{{count}} tools', { count: String(toolCount) }),
+        );
+      }
+      if (promptCount > 0) {
+        parts.push(
+          promptCount === 1
+            ? t('{{count}} prompt', { count: String(promptCount) })
+            : t('{{count}} prompts', { count: String(promptCount) }),
+        );
+      }
+
+      const serverAuthStatus = item.authStatus[serverName];
+      let authLabel = '';
+      if (serverAuthStatus === 'authenticated') {
+        authLabel = t('OAuth');
+      } else if (serverAuthStatus === 'expired') {
+        authLabel = t('OAuth expired');
+      } else if (serverAuthStatus === 'unauthenticated') {
+        authLabel = t('OAuth not authenticated');
+      }
+
+      const countsSuffix =
+        status === MCPServerStatus.CONNECTED && parts.length > 0
+          ? ` (${parts.join(', ')})`
+          : '';
+      const authSuffix = authLabel ? ` (${authLabel})` : '';
+      lines.push(
+        `- ${serverDisplayName} - ${statusText}${countsSuffix}${authSuffix}`,
+      );
+
+      if (status === MCPServerStatus.CONNECTING) {
+        lines.push(`  (${t('tools and prompts will appear when ready')})`);
+      }
+      if (status === MCPServerStatus.DISCONNECTED && toolCount > 0) {
+        lines.push(
+          `  (${t('{{count}} tools cached', {
+            count: String(toolCount),
+          })})`,
+        );
+      }
+
+      if (item.showDescriptions && server?.description) {
+        lines.push(`  ${server.description.trim()}`);
+      }
+
+      if (serverTools.length > 0) {
+        lines.push(`  ${t('Tools:')}`);
+        for (const tool of serverTools) {
+          lines.push(`  - ${tool.name}`);
+          if (item.showDescriptions && tool.description) {
+            lines.push(`    ${tool.description.trim()}`);
+          }
+          if (
+            item.showSchema &&
+            tool.schema &&
+            (tool.schema.parametersJsonSchema || tool.schema.parameters)
+          ) {
+            const schemaContent = JSON.stringify(
+              tool.schema.parametersJsonSchema ?? tool.schema.parameters,
+              null,
+              2,
+            );
+            lines.push(`    ${t('Parameters:')}`);
+            for (const line of schemaContent.split('\n')) {
+              lines.push(`    ${line}`);
+            }
+          }
+        }
+      }
+
+      if (serverPrompts.length > 0) {
+        lines.push(`  ${t('Prompts:')}`);
+        for (const prompt of serverPrompts) {
+          lines.push(`  - ${prompt.name}`);
+          if (item.showDescriptions && prompt.description) {
+            lines.push(`    ${prompt.description.trim()}`);
+          }
+        }
+      }
+    }
+
+    if (item.blockedServers.length > 0) {
+      for (const server of item.blockedServers) {
+        const extensionSuffix = server.extensionName
+          ? ` ${t('(from {{extensionName}})', {
+              extensionName: server.extensionName,
+            })}`
+          : '';
+        lines.push(`- ${server.name}${extensionSuffix} - ${t('Blocked')}`);
+      }
+    }
+
+    if (item.showTips) {
+      lines.push('');
+      lines.push(t('💡 Tips:'));
+      lines.push(
+        `  - ${t('Use')} /mcp desc ${t(
+          'to show server and tool descriptions',
+        )}`,
+      );
+      lines.push(
+        `  - ${t('Use')} /mcp schema ${t('to show tool parameter schemas')}`,
+      );
+      lines.push(`  - ${t('Use')} /mcp nodesc ${t('to hide descriptions')}`);
+      lines.push(
+        `  - ${t('Use')} /mcp auth <server-name> ${t(
+          'to authenticate with OAuth-enabled servers',
+        )}`,
+      );
+      lines.push(
+        `  - ${t('Press')} Ctrl+T ${t('to toggle tool descriptions on/off')}`,
+      );
+    }
+
+    return lines.join('\n');
+  }
+
+  private formatExtensionsList(): string {
+    const extensions = this.config.getExtensions();
+    if (extensions.length === 0) {
+      return t('No extensions installed.');
+    }
+
+    const disabled = this.settings.merged.extensions?.disabled ?? [];
+    const lines: string[] = ['Installed extensions:'];
+    for (const extension of extensions) {
+      const isActive = !disabled.includes(extension.name);
+      const version = extension.version ? ` (v${extension.version})` : '';
+      const activeLabel = isActive ? 'active' : 'disabled';
+      lines.push(`  - ${extension.name}${version} - ${activeLabel}`);
+    }
+
+    return lines.join('\n');
+  }
+
+  private formatHelp(
+    commands: readonly SlashCommand[],
+    _item: HistoryItemHelp,
+  ): string {
+    const lines: string[] = [t('Commands:')];
+    const visibleCommands = commands.filter(
+      (command) => command.description && !command.hidden,
+    );
+
+    if (visibleCommands.length === 0) {
+      lines.push(t('No commands available.'));
+      return lines.join('\n');
+    }
+
+    for (const command of visibleCommands) {
+      const description = command.description
+        ? ` - ${command.description}`
+        : '';
+      lines.push(`${this.formatCommandLabel(command, '/')}${description}`);
+      if (command.subCommands) {
+        for (const subCommand of command.subCommands.filter(
+          (entry) => !entry.hidden,
+        )) {
+          const subDescription = subCommand.description
+            ? ` - ${subCommand.description}`
+            : '';
+          lines.push(
+            `  ${this.formatCommandLabel(subCommand)}${subDescription}`,
+          );
+        }
+      }
+    }
+
+    return lines.join('\n');
+  }
+
+  private formatCommandLabel(command: SlashCommand, prefix = ''): string {
+    const altNames = command.altNames?.filter(Boolean);
+    const baseLabel = `${prefix}${command.name}`;
+
+    if (!altNames || altNames.length === 0) {
+      return baseLabel;
+    }
+
+    return `${baseLabel} (${altNames.join(', ')})`;
+  }
+
+  private formatAbout(item: HistoryItemAbout): string {
+    const fields = getSystemInfoFields(item.systemInfo);
+    const lines: string[] = [t('About Gus Qwen')];
+
+    for (const field of fields) {
+      lines.push(`${field.label}: ${getFieldValue(field, item.systemInfo)}`);
+    }
+
+    return lines.join('\n');
+  }
+
+  private formatStats(item: HistoryItemStats): string {
+    return t('Session duration: {{duration}}', {
+      duration: item.duration,
+    });
+  }
+
+  private formatSummary(item: HistoryItemSummary): string {
+    if (item.summary.isPending) {
+      return item.summary.stage === 'generating'
+        ? t('Generating project summary...')
+        : t('Saving project summary...');
+    }
+
+    if (item.summary.filePath) {
+      return t('Project summary saved to {{path}}', {
+        path: item.summary.filePath,
+      });
+    }
+
+    return t('Project summary completed.');
+  }
+
+  private formatQuit(item: HistoryItemQuit): string {
+    return t('Session ended after {{duration}}.', {
+      duration: item.duration,
+    });
+  }
+
   async sendUpdate(update: acp.SessionUpdate): Promise<void> {
     const params: acp.SessionNotification = {
       sessionId: this.sessionId,
@@ -293,33 +1167,58 @@ export class Session implements SessionContext {
   }
 
   async sendAvailableCommandsUpdate(): Promise<void> {
+    console.log('[Session] Starting sendAvailableCommandsUpdate');
     const abortController = new AbortController();
     try {
+      console.log(
+        '[Session] Calling getAvailableCommands with allowed commands:',
+        ALLOWED_BUILTIN_COMMANDS_FOR_ACP,
+      );
       const slashCommands = await getAvailableCommands(
         this.config,
         this.settings,
         abortController.signal,
         ALLOWED_BUILTIN_COMMANDS_FOR_ACP,
       );
+      console.log(
+        '[Session] getAvailableCommands returned',
+        slashCommands.length,
+        'commands',
+      );
 
       // Convert SlashCommand[] to AvailableCommand[] format for ACP protocol
-      const availableCommands: AvailableCommand[] = slashCommands.map(
-        (cmd) => ({
-          name: cmd.name,
-          description: cmd.description,
-          input: null,
-        }),
+      console.log(
+        '[Session] Mapping commands for ACP:',
+        slashCommands.map((c) => c.name),
       );
+
+      // Recursive function to map a SlashCommand to an AvailableCommand
+      const mapCommand = (cmd: SlashCommand): AvailableCommand => ({
+        name: cmd.name,
+        description: cmd.description,
+        input: null,
+        subCommands: cmd.subCommands?.map(mapCommand),
+      });
+
+      const availableCommands: AvailableCommand[] =
+        slashCommands.map(mapCommand);
 
       const update: AvailableCommandsUpdate = {
         sessionUpdate: 'available_commands_update',
         availableCommands,
       };
 
+      console.log(
+        '[Session] Sending available_commands_update with',
+        availableCommands.length,
+        'commands:',
+        availableCommands.map((c) => c.name),
+      );
       await this.sendUpdate(update);
+      console.log('[Session] Successfully sent available_commands_update');
     } catch (error) {
       // Log error but don't fail session creation
-      console.error('Error sending available commands update:', error);
+      console.error('Error sending available_commands_update:', error);
     }
   }
 

@@ -16,8 +16,8 @@ import {
   SETTINGS_DIRECTORY_NAME,
 } from '../config/settings.js';
 import { promisify } from 'node:util';
-import type { Config, SandboxConfig } from '@qwen-code/qwen-code-core';
-import { FatalSandboxError } from '@qwen-code/qwen-code-core';
+import type { Config, SandboxConfig } from '@psd-tech/gusqwen-core';
+import { FatalSandboxError } from '@psd-tech/gusqwen-core';
 import { ConsolePatcher } from '../ui/utils/ConsolePatcher.js';
 import { randomBytes } from 'node:crypto';
 
@@ -36,9 +36,9 @@ function getContainerPath(hostPath: string): string {
   return hostPath;
 }
 
-const LOCAL_DEV_SANDBOX_IMAGE_NAME = 'qwen-code-sandbox';
-const SANDBOX_NETWORK_NAME = 'qwen-code-sandbox';
-const SANDBOX_PROXY_NAME = 'qwen-code-sandbox-proxy';
+const LOCAL_DEV_SANDBOX_IMAGE_NAME = 'gusqwen-sandbox';
+const SANDBOX_NETWORK_NAME = 'gusqwen-sandbox';
+const SANDBOX_PROXY_NAME = 'gusqwen-sandbox-proxy';
 const BUILTIN_SEATBELT_PROFILES = [
   'permissive-open',
   'permissive-closed',
@@ -177,8 +177,8 @@ function entrypoint(workdir: string, cliArgs: string[]): string[] {
         ? 'npm run debug --'
         : 'npm rebuild && npm run start --'
       : process.env['DEBUG']
-        ? `node --inspect-brk=0.0.0.0:${process.env['DEBUG_PORT'] || '9229'} $(which qwen)`
-        : 'qwen';
+        ? `node --inspect-brk=0.0.0.0:${process.env['DEBUG_PORT'] || '9229'} $(which gusqwen)`
+        : 'gusqwen';
 
   const args = [...shellCmds, cliCmd, ...quotedCliArgs];
   return ['bash', '-c', args.join(' ')];

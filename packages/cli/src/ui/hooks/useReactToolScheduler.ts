@@ -19,8 +19,8 @@ import type {
   ToolCall,
   Status as CoreStatus,
   EditorType,
-} from '@qwen-code/qwen-code-core';
-import { CoreToolScheduler } from '@qwen-code/qwen-code-core';
+} from '@psd-tech/gusqwen-core';
+import { CoreToolScheduler } from '@psd-tech/gusqwen-core';
 import { useCallback, useState, useMemo } from 'react';
 import type {
   HistoryItemToolGroup,

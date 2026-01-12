@@ -1,6 +1,6 @@
 /**
  * @license
- * Copyright 2025 Qwen Team
+ * Copyright 2025 Gus Qwen Team
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -105,6 +105,14 @@ export class WebViewProvider {
       });
     });
 
+    // Surface confirm action requests (from ACP commands like /init)
+    this.agentManager.onConfirmAction((notice) => {
+      this.sendMessageToWebView({
+        type: 'confirm_action',
+        data: notice,
+      });
+    });
+
     // Surface mode changes (from ACP or immediate set_mode response)
     this.agentManager.onModeChanged((modeId) => {
       try {
@@ -115,6 +123,14 @@ export class WebViewProvider {
       this.sendMessageToWebView({
         type: 'modeChanged',
         data: { modeId },
+      });
+    });
+
+    // Setup available commands handler
+    this.agentManager.onAvailableCommands((commands) => {
+      this.sendMessageToWebView({
+        type: 'available_commands_update',
+        data: { commands },
       });
     });
 
@@ -168,6 +184,13 @@ export class WebViewProvider {
       });
     });
 
+    this.agentManager.onCompression((info) => {
+      this.sendMessageToWebView({
+        type: 'compression',
+        data: info,
+      });
+    });
+
     this.agentManager.onPermissionRequest(
       async (request: AcpPermissionRequest) => {
         // Auto-approve in auto/yolo mode (no UI, no diff)
@@ -211,13 +234,13 @@ export class WebViewProvider {
                 type: 'permissionResolved',
                 data: { optionId },
               });
-              // If allowed/proceeded, close any open qwen-diff editors and suppress re-open briefly
+              // If allowed/proceeded, close any open gusqwen-diff editors and suppress re-open briefly
               const isCancel =
                 optionId === 'cancel' ||
                 optionId.toLowerCase().includes('reject');
               if (!isCancel) {
                 try {
-                  void vscode.commands.executeCommand('qwen.diff.closeAll');
+                  void vscode.commands.executeCommand('gusqwen.diff.closeAll');
                 } catch (err) {
                   console.warn(
                     '[WebViewProvider] Failed to close diffs after allow (resolver):',
@@ -226,7 +249,7 @@ export class WebViewProvider {
                 }
                 try {
                   void vscode.commands.executeCommand(
-                    'qwen.diff.suppressBriefly',
+                    'gusqwen.diff.suppressBriefly',
                   );
                 } catch (err) {
                   console.warn(
@@ -326,10 +349,10 @@ export class WebViewProvider {
                 }
               })();
             }
-            // If user allowed/proceeded, proactively close any open qwen-diff editors and suppress re-open briefly
+            // If user allowed/proceeded, proactively close any open gusqwen-diff editors and suppress re-open briefly
             else {
               try {
-                void vscode.commands.executeCommand('qwen.diff.closeAll');
+                void vscode.commands.executeCommand('gusqwen.diff.closeAll');
               } catch (err) {
                 console.warn(
                   '[WebViewProvider] Failed to close diffs after allow:',
@@ -338,7 +361,7 @@ export class WebViewProvider {
               }
               try {
                 void vscode.commands.executeCommand(
-                  'qwen.diff.suppressBriefly',
+                  'gusqwen.diff.suppressBriefly',
                 );
               } catch (err) {
                 console.warn(
@@ -409,7 +432,7 @@ export class WebViewProvider {
           ).trim();
           const panelRef = this.panelManager.getPanel();
           if (panelRef) {
-            panelRef.title = title || 'Qwen Code';
+            panelRef.title = title || 'Gus Qwen';
           }
           return;
         }
@@ -565,7 +588,7 @@ export class WebViewProvider {
       const bundledCliEntry = vscode.Uri.joinPath(
         this.extensionUri,
         'dist',
-        'qwen-cli',
+        'gusqwen-cli',
         'cli.js',
       ).fsPath;
 
@@ -986,7 +1009,7 @@ export class WebViewProvider {
 
     // Ensure restored tab title starts from default label
     try {
-      panel.title = 'Qwen Code';
+      panel.title = 'Gus Qwen';
     } catch (e) {
       console.warn(
         '[WebViewProvider] Failed to reset restored panel title:',
@@ -1009,7 +1032,7 @@ export class WebViewProvider {
           ).trim();
           const panelRef = this.panelManager.getPanel();
           if (panelRef) {
-            panelRef.title = title || 'Qwen Code';
+            panelRef.title = title || 'Gus Qwen';
           }
           return;
         }

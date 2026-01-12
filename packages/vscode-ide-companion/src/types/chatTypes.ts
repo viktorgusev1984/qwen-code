@@ -1,6 +1,6 @@
 /**
  * @license
- * Copyright 2025 Qwen Team
+ * Copyright 2025 Gus Qwen Team
  * SPDX-License-Identifier: Apache-2.0
  */
 import type { AcpPermissionRequest } from './acpTypes.js';
@@ -28,12 +28,27 @@ export interface ToolCallUpdateData {
   locations?: Array<{ path: string; line?: number | null }>;
 }
 
+export interface ChatCompressionNotice {
+  originalTokenCount: number;
+  newTokenCount: number;
+  trigger: 'auto' | 'manual';
+}
+
+export interface ConfirmActionNotice {
+  prompt: string;
+  originalInvocation: { raw: string };
+}
+
+import type { AvailableCommand } from '../../../cli/src/acp-integration/schema.js';
+
 export interface QwenAgentCallbacks {
   onMessage?: (message: ChatMessage) => void;
   onStreamChunk?: (chunk: string) => void;
   onThoughtChunk?: (chunk: string) => void;
   onToolCall?: (update: ToolCallUpdateData) => void;
   onPlan?: (entries: PlanEntry[]) => void;
+  onCompression?: (info: ChatCompressionNotice) => void;
+  onConfirmAction?: (notice: ConfirmActionNotice) => void;
   onPermissionRequest?: (request: AcpPermissionRequest) => Promise<string>;
   onEndTurn?: (reason?: string) => void;
   onModeInfo?: (info: {
@@ -45,6 +60,7 @@ export interface QwenAgentCallbacks {
     }>;
   }) => void;
   onModeChanged?: (modeId: ApprovalModeValue) => void;
+  onAvailableCommands?: (commands: AvailableCommand[]) => void;
 }
 
 export interface ToolCallUpdate {

@@ -1,16 +1,16 @@
 {
-  "name": "@qwen-code/qwen-code",
-  "version": "0.6.0",
-  "description": "Qwen Code",
+  "name": "@psd-tech/gusqwen",
+  "version": "0.3.15",
+  "description": "Gus Qwen",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/QwenLM/qwen-code.git"
+    "url": "git+https://gitlab.tcsbank.ru/psd-tech/gusqwen.git"
   },
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "bin": {
-    "qwen": "dist/index.js"
+    "gusqwen": "dist/index.js"
   },
   "exports": {
     ".": {
@@ -33,12 +33,12 @@
     "dist"
   ],
   "config": {
-    "sandboxImageUri": "ghcr.io/qwenlm/qwen-code:0.6.0"
+    "sandboxImageUri": "ghcr.io/gusqwenlm/gusqwen:0.3.15"
   },
   "dependencies": {
     "@google/genai": "1.30.0",
     "@iarna/toml": "^2.2.5",
-    "@qwen-code/qwen-code-core": "file:../core",
+    "@psd-tech/gusqwen-core": "file:../core",
     "@modelcontextprotocol/sdk": "^1.25.1",
     "@types/update-notifier": "^6.0.8",
     "ansi-regex": "^6.2.2",
@@ -93,7 +93,7 @@
     "react-dom": "^19.1.0",
     "typescript": "^5.3.3",
     "vitest": "^3.1.1",
-    "@qwen-code/qwen-code-test-utils": "file:../test-utils"
+    "@psd-tech/gusqwen-test-utils": "file:../test-utils"
   },
   "engines": {
     "node": ">=20"

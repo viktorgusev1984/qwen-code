@@ -13,15 +13,15 @@ import {
   getMCPServerStatus,
   getMCPDiscoveryState,
   DiscoveredMCPTool,
-} from '@qwen-code/qwen-code-core';
+} from '@psd-tech/gusqwen-core';
 
 import type { CallableTool } from '@google/genai';
 import { Type } from '@google/genai';
 import { MessageType } from '../types.js';
 
-vi.mock('@qwen-code/qwen-code-core', async (importOriginal) => {
+vi.mock('@psd-tech/gusqwen-core', async (importOriginal) => {
   const actual =
-    await importOriginal<typeof import('@qwen-code/qwen-code-core')>();
+    await importOriginal<typeof import('@psd-tech/gusqwen-core')>();
   const mockAuthenticate = vi.fn();
   return {
     ...actual,

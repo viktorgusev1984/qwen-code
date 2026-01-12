@@ -21,7 +21,7 @@ import type { ContentGeneratorConfig } from '../core/contentGenerator.js';
 import { DEFAULT_DASHSCOPE_BASE_URL } from '../core/openaiContentGenerator/constants.js';
 
 /**
- * Qwen Content Generator that uses Qwen OAuth tokens with automatic refresh
+ * Qwen Content Generator that uses Gus Qwen OAuth tokens with automatic refresh
  */
 export class QwenContentGenerator extends OpenAIContentGenerator {
   private qwenClient: IQwenOAuth2Client;

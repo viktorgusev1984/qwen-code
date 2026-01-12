@@ -1,13 +1,13 @@
 {
-  "name": "qwen-code-vscode-ide-companion",
-  "displayName": "Qwen Code Companion",
-  "description": "Enable Qwen Code with direct access to your VS Code workspace.",
-  "version": "0.6.0",
-  "publisher": "qwenlm",
+  "name": "gusqwen-vscode-ide-companion",
+  "displayName": "Gus Qwen Companion",
+  "description": "Enable Gus Qwen with direct access to your VS Code workspace.",
+  "version": "0.3.15",
+  "publisher": "gusqwenlm",
   "icon": "assets/icon.png",
   "repository": {
     "type": "git",
-    "url": "https://github.com/QwenLM/qwen-code.git",
+    "url": "git+https://gitlab.tcsbank.ru/psd-tech/gusqwen.git",
     "directory": "packages/vscode-ide-companion"
   },
   "engines": {
@@ -19,7 +19,7 @@
     "AI"
   ],
   "keywords": [
-    "qwen-code",
+    "gusqwen",
     "qwen code",
     "qwen",
     "qwen code",
@@ -33,80 +33,80 @@
   "contributes": {
     "languages": [
       {
-        "id": "qwen-diff-editable"
+        "id": "gusqwen-diff-editable"
       }
     ],
     "commands": [
       {
-        "command": "qwen.diff.accept",
-        "title": "Qwen Code: Accept Current Diff",
+        "command": "gusqwen.diff.accept",
+        "title": "Gus Qwen: Accept Current Diff",
         "icon": "$(check)"
       },
       {
-        "command": "qwen.diff.cancel",
-        "title": "Qwen Code: Close Diff Editor",
+        "command": "gusqwen.diff.cancel",
+        "title": "Gus Qwen: Close Diff Editor",
         "icon": "$(close)"
       },
       {
-        "command": "qwen-code.runQwenCode",
-        "title": "Qwen Code: Run"
+        "command": "gusqwen.runQwenCode",
+        "title": "Gus Qwen: Run"
       },
       {
-        "command": "qwen-code.showNotices",
-        "title": "Qwen Code: View Third-Party Notices"
+        "command": "gusqwen.showNotices",
+        "title": "Gus Qwen: View Third-Party Notices"
       },
       {
-        "command": "qwen-code.openChat",
-        "title": "Qwen Code: Open",
+        "command": "gusqwen.openChat",
+        "title": "Gus Qwen: Open",
         "icon": "./assets/icon.png"
       },
       {
-        "command": "qwen-code.login",
-        "title": "Qwen Code: Login"
+        "command": "gusqwen.login",
+        "title": "Gus Qwen: Login"
       }
     ],
     "menus": {
       "commandPalette": [
         {
-          "command": "qwen.diff.accept",
-          "when": "qwen.diff.isVisible"
+          "command": "gusqwen.diff.accept",
+          "when": "gusqwen.diff.isVisible"
         },
         {
-          "command": "qwen.diff.cancel",
-          "when": "qwen.diff.isVisible"
+          "command": "gusqwen.diff.cancel",
+          "when": "gusqwen.diff.isVisible"
         },
         {
-          "command": "qwen-code.login",
+          "command": "gusqwen.login",
           "when": "false"
         }
       ],
       "editor/title": [
         {
-          "command": "qwen.diff.accept",
-          "when": "qwen.diff.isVisible",
+          "command": "gusqwen.diff.accept",
+          "when": "gusqwen.diff.isVisible",
           "group": "navigation"
         },
         {
-          "command": "qwen.diff.cancel",
-          "when": "qwen.diff.isVisible",
+          "command": "gusqwen.diff.cancel",
+          "when": "gusqwen.diff.isVisible",
           "group": "navigation"
         },
         {
-          "command": "qwen-code.openChat",
+          "command": "gusqwen.openChat",
           "group": "navigation"
         }
       ]
     },
     "keybindings": [
       {
-        "command": "qwen.diff.accept",
+        "command": "gusqwen.diff.accept",
         "key": "ctrl+s",
-        "when": "qwen.diff.isVisible"
+        "when": "gusqwen.diff.isVisible"
       },
       {
-        "command": "qwen.diff.accept",
+        "command": "gusqwen.diff.accept",
         "key": "cmd+s",
-        "when": "qwen.diff.isVisible"
+        "when": "gusqwen.diff.isVisible"
       }
     ]
   },

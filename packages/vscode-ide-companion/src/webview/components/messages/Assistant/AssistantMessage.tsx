@@ -1,6 +1,6 @@
 /**
  * @license
- * Copyright 2025 Qwen Team
+ * Copyright 2025 Gus Qwen Team
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -18,7 +18,7 @@ interface AssistantMessageProps {
 }
 
 /**
- * AssistantMessage component - renders AI responses with Qwen Code styling
+ * AssistantMessage component - renders AI responses with Gus Qwen styling
  * Supports different states: default, success, error, warning, loading
  */
 export const AssistantMessage: React.FC<AssistantMessageProps> = ({

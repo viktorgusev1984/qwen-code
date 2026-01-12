@@ -4,6 +4,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import * as fs from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
 import * as vscode from 'vscode';
 import { IDEServer } from './ide-server.js';
 import semver from 'semver';
@@ -13,13 +16,16 @@ import {
   detectIdeFromEnv,
   IDE_DEFINITIONS,
   type IdeInfo,
-} from '@qwen-code/qwen-code-core/src/ide/detect-ide.js';
+} from '@psd-tech/gusqwen-core/src/ide/detect-ide.js';
 import { WebViewProvider } from './webview/WebViewProvider.js';
 import { registerNewCommands } from './commands/index.js';
 
-const CLI_IDE_COMPANION_IDENTIFIER = 'qwenlm.qwen-code-vscode-ide-companion';
+const VSCODE_VSIX_BASE_URL =
+  'https://s3-msk.tinkoff.ru/psd-tech-gusqwen/vscode';
+const VSCODE_VSIX_LATEST_URL = `${VSCODE_VSIX_BASE_URL}/latest.json`;
+const VSCODE_VSIX_FILENAME_PREFIX = 'gusqwen-vscode-ide-companion';
 const INFO_MESSAGE_SHOWN_KEY = 'qwenCodeInfoMessageShown';
-export const DIFF_SCHEME = 'qwen-diff';
+export const DIFF_SCHEME = 'gusqwen-diff';
 
 /**
  * IDE environments where the installation greeting is hidden.  In these
@@ -37,6 +43,40 @@ let webViewProviders: WebViewProvider[] = []; // Track multiple chat tabs
 
 let log: (message: string) => void = () => {};
 
+type LatestVsixManifest = {
+  version?: string;
+  vsixUrl?: string;
+  versions?: Array<{ version?: string; vsixUrl?: string }>;
+};
+
+function buildVsixUrl(version: string): string {
+  return `${VSCODE_VSIX_BASE_URL}/${VSCODE_VSIX_FILENAME_PREFIX}-${version}.vsix`;
+}
+
+async function downloadVsix(vsixUrl: string): Promise<{
+  vsixPath: string;
+  cleanup: () => Promise<void>;
+}> {
+  const response = await fetch(vsixUrl);
+  if (!response.ok) {
+    throw new Error(
+      `Failed to download VSIX from ${vsixUrl}: ${response.status} ${response.statusText}`,
+    );
+  }
+  const buffer = Buffer.from(await response.arrayBuffer());
+  const tempDir = await fs.promises.mkdtemp(
+    path.join(os.tmpdir(), 'gusqwen-vsix-'),
+  );
+  const vsixPath = path.join(tempDir, `${VSCODE_VSIX_FILENAME_PREFIX}.vsix`);
+  await fs.promises.writeFile(vsixPath, buffer);
+  return {
+    vsixPath,
+    cleanup: async () => {
+      await fs.promises.rm(tempDir, { recursive: true, force: true });
+    },
+  };
+}
+
 async function checkForUpdates(
   context: vscode.ExtensionContext,
   log: (message: string) => void,
@@ -44,57 +84,51 @@ async function checkForUpdates(
   try {
     const currentVersion = context.extension.packageJSON.version;
 
-    // Fetch extension details from the VSCode Marketplace.
-    const response = await fetch(
-      'https://marketplace.visualstudio.com/_apis/public/gallery/extensionquery',
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Accept: 'application/json;api-version=7.1-preview.1',
-        },
-        body: JSON.stringify({
-          filters: [
-            {
-              criteria: [
-                {
-                  filterType: 7, // Corresponds to ExtensionName
-                  value: CLI_IDE_COMPANION_IDENTIFIER,
-                },
-              ],
-            },
-          ],
-          // See: https://learn.microsoft.com/en-us/azure/devops/extend/gallery/apis/hyper-linking?view=azure-devops
-          // 946 = IncludeVersions | IncludeFiles | IncludeCategoryAndTags |
-          //       IncludeShortDescription | IncludePublisher | IncludeStatistics
-          flags: 946,
-        }),
-      },
-    );
+    const response = await fetch(VSCODE_VSIX_LATEST_URL, {
+      headers: { Accept: 'application/json' },
+    });
 
     if (!response.ok) {
       log(
-        `Failed to fetch latest version info from marketplace: ${response.statusText}`,
+        `Failed to fetch latest version info from S3: ${response.statusText}`,
       );
       return;
     }
 
-    const data = await response.json();
-    const extension = data?.results?.[0]?.extensions?.[0];
-    // The versions are sorted by date, so the first one is the latest.
-    const latestVersion = extension?.versions?.[0]?.version;
+    const data = (await response.json()) as LatestVsixManifest | null;
+    const latestVersion =
+      data?.version ??
+      (Array.isArray(data?.versions)
+        ? data?.versions?.[0]?.version
+        : undefined);
 
-    if (latestVersion && semver.gt(latestVersion, currentVersion)) {
+    if (typeof latestVersion !== 'string' || !semver.valid(latestVersion)) {
+      log(`Invalid latest version info from S3: ${String(latestVersion)}`);
+      return;
+    }
+
+    if (semver.gt(latestVersion, currentVersion)) {
       const selection = await vscode.window.showInformationMessage(
-        `A new version (${latestVersion}) of the Qwen Code Companion extension is available.`,
+        `A new version (${latestVersion}) of the Gus Qwen Companion extension is available.`,
         'Update to latest version',
       );
       if (selection === 'Update to latest version') {
-        // The install command will update the extension if a newer version is found.
-        await vscode.commands.executeCommand(
-          'workbench.extensions.installExtension',
-          CLI_IDE_COMPANION_IDENTIFIER,
-        );
+        const vsixUrl = data?.vsixUrl ?? buildVsixUrl(latestVersion);
+        try {
+          const { vsixPath, cleanup } = await downloadVsix(vsixUrl);
+          try {
+            await vscode.commands.executeCommand(
+              'workbench.extensions.installExtension',
+              vscode.Uri.file(vsixPath),
+            );
+          } finally {
+            await cleanup();
+          }
+        } catch (error) {
+          const message =
+            error instanceof Error ? error.message : String(error);
+          log(`Failed to install VSIX update: ${message}`);
+        }
       }
     }
   } catch (error) {
@@ -104,7 +138,7 @@ async function checkForUpdates(
 }
 
 export async function activate(context: vscode.ExtensionContext) {
-  logger = vscode.window.createOutputChannel('Qwen Code Companion');
+  logger = vscode.window.createOutputChannel('Gus Qwen Companion');
   log = createLogger(context, logger);
   log('Extension activated');
 
@@ -137,7 +171,7 @@ export async function activate(context: vscode.ExtensionContext) {
 
   // Register WebView panel serializer for persistence across reloads
   context.subscriptions.push(
-    vscode.window.registerWebviewPanelSerializer('qwenCode.chat', {
+    vscode.window.registerWebviewPanelSerializer('gusqwen.chat', {
       async deserializeWebviewPanel(
         webviewPanel: vscode.WebviewPanel,
         state: unknown,
@@ -191,54 +225,63 @@ export async function activate(context: vscode.ExtensionContext) {
       DIFF_SCHEME,
       diffContentProvider,
     ),
-    (vscode.commands.registerCommand('qwen.diff.accept', (uri?: vscode.Uri) => {
-      const docUri = uri ?? vscode.window.activeTextEditor?.document.uri;
-      if (docUri && docUri.scheme === DIFF_SCHEME) {
-        diffManager.acceptDiff(docUri);
-      }
-      // If WebView is requesting permission, actively select an allow option (prefer once)
-      try {
-        for (const provider of webViewProviders) {
-          if (provider?.hasPendingPermission()) {
-            provider.respondToPendingPermission('allow');
-          }
+    (vscode.commands.registerCommand(
+      'gusqwen.diff.accept',
+      (uri?: vscode.Uri) => {
+        const docUri = uri ?? vscode.window.activeTextEditor?.document.uri;
+        if (docUri && docUri.scheme === DIFF_SCHEME) {
+          diffManager.acceptDiff(docUri);
         }
-      } catch (err) {
-        console.warn('[Extension] Auto-allow on diff.accept failed:', err);
-      }
-      console.log('[Extension] Diff accepted');
-    }),
-    vscode.commands.registerCommand('qwen.diff.cancel', (uri?: vscode.Uri) => {
-      const docUri = uri ?? vscode.window.activeTextEditor?.document.uri;
-      if (docUri && docUri.scheme === DIFF_SCHEME) {
-        diffManager.cancelDiff(docUri);
-      }
-      // If WebView is requesting permission, actively select reject/cancel
-      try {
-        for (const provider of webViewProviders) {
-          if (provider?.hasPendingPermission()) {
-            provider.respondToPendingPermission('cancel');
+        // If WebView is requesting permission, actively select an allow option (prefer once)
+        try {
+          for (const provider of webViewProviders) {
+            if (provider?.hasPendingPermission()) {
+              provider.respondToPendingPermission('allow');
+            }
           }
+        } catch (err) {
+          console.warn('[Extension] Auto-allow on diff.accept failed:', err);
         }
-      } catch (err) {
-        console.warn('[Extension] Auto-reject on diff.cancel failed:', err);
-      }
-      console.log('[Extension] Diff cancelled');
-    })),
-    vscode.commands.registerCommand('qwen.diff.closeAll', async () => {
+        console.log('[Extension] Diff accepted');
+      },
+    ),
+    vscode.commands.registerCommand(
+      'gusqwen.diff.cancel',
+      (uri?: vscode.Uri) => {
+        const docUri = uri ?? vscode.window.activeTextEditor?.document.uri;
+        if (docUri && docUri.scheme === DIFF_SCHEME) {
+          diffManager.cancelDiff(docUri);
+        }
+        // If WebView is requesting permission, actively select reject/cancel
+        try {
+          for (const provider of webViewProviders) {
+            if (provider?.hasPendingPermission()) {
+              provider.respondToPendingPermission('cancel');
+            }
+          }
+        } catch (err) {
+          console.warn('[Extension] Auto-reject on diff.cancel failed:', err);
+        }
+        console.log('[Extension] Diff cancelled');
+      },
+    )),
+    vscode.commands.registerCommand('gusqwen.diff.closeAll', async () => {
       try {
         await diffManager.closeAll();
       } catch (err) {
-        console.warn('[Extension] qwen.diff.closeAll failed:', err);
+        console.warn('[Extension] gusqwen.diff.closeAll failed:', err);
       }
     }),
-    vscode.commands.registerCommand('qwen.diff.suppressBriefly', async () => {
-      try {
-        diffManager.suppressFor(1200);
-      } catch (err) {
-        console.warn('[Extension] qwen.diff.suppressBriefly failed:', err);
-      }
-    }),
+    vscode.commands.registerCommand(
+      'gusqwen.diff.suppressBriefly',
+      async () => {
+        try {
+          diffManager.suppressFor(1200);
+        } catch (err) {
+          console.warn('[Extension] gusqwen.diff.suppressBriefly failed:', err);
+        }
+      },
+    ),
   );
 
   ideServer = new IDEServer(log, diffManager);
@@ -255,7 +298,7 @@ export async function activate(context: vscode.ExtensionContext) {
 
   if (!context.globalState.get(INFO_MESSAGE_SHOWN_KEY) && infoMessageEnabled) {
     void vscode.window.showInformationMessage(
-      'Qwen Code Companion extension successfully installed.',
+      'Gus Qwen Companion extension successfully installed.',
     );
     context.globalState.update(INFO_MESSAGE_SHOWN_KEY, true);
   }
@@ -268,7 +311,7 @@ export async function activate(context: vscode.ExtensionContext) {
       ideServer.syncEnvVars();
     }),
     vscode.commands.registerCommand(
-      'qwen-code.runQwenCode',
+      'gusqwen.runQwenCode',
       async (
         location?:
           | vscode.TerminalLocation
@@ -277,7 +320,7 @@ export async function activate(context: vscode.ExtensionContext) {
         const workspaceFolders = vscode.workspace.workspaceFolders;
         if (!workspaceFolders || workspaceFolders.length === 0) {
           vscode.window.showInformationMessage(
-            'No folder open. Please open a folder to run Qwen Code.',
+            'No folder open. Please open a folder to run Gus Qwen.',
           );
           return;
         }
@@ -287,7 +330,7 @@ export async function activate(context: vscode.ExtensionContext) {
           selectedFolder = workspaceFolders[0];
         } else {
           selectedFolder = await vscode.window.showWorkspaceFolderPick({
-            placeHolder: 'Select a folder to run Qwen Code in',
+            placeHolder: 'Select a folder to run Gus Qwen in',
           });
         }
 
@@ -295,13 +338,13 @@ export async function activate(context: vscode.ExtensionContext) {
           const cliEntry = vscode.Uri.joinPath(
             context.extensionUri,
             'dist',
-            'qwen-cli',
+            'gusqwen-cli',
             'cli.js',
           ).fsPath;
           const quote = (s: string) => `"${s.replaceAll('"', '\\"')}"`;
           const qwenCmd = `${quote(process.execPath)} ${quote(cliEntry)}`;
           const terminal = vscode.window.createTerminal({
-            name: `Qwen Code (${selectedFolder.name})`,
+            name: `Gus Qwen (${selectedFolder.name})`,
             cwd: selectedFolder.uri.fsPath,
             location,
           });
@@ -310,7 +353,7 @@ export async function activate(context: vscode.ExtensionContext) {
         }
       },
     ),
-    vscode.commands.registerCommand('qwen-code.showNotices', async () => {
+    vscode.commands.registerCommand('gusqwen.showNotices', async () => {
       const noticePath = vscode.Uri.joinPath(
         context.extensionUri,
         'NOTICES.txt',

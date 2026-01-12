@@ -1,6 +1,6 @@
 /**
  * @license
- * Copyright 2025 Qwen Team
+ * Copyright 2025 Gus Qwen Team
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -12,12 +12,12 @@ import type {
   SessionMetrics,
   ServerGeminiStreamEvent,
   TaskResultDisplay,
-} from '@qwen-code/qwen-code-core';
+} from '@psd-tech/gusqwen-core';
 import {
   GeminiEventType,
   ToolErrorType,
   parseAndFormatApiError,
-} from '@qwen-code/qwen-code-core';
+} from '@psd-tech/gusqwen-core';
 import type { Part, GenerateContentResponseUsageMetadata } from '@google/genai';
 import type {
   CLIAssistantMessage,
@@ -128,6 +128,9 @@ export abstract class BaseJsonOutputAdapter {
 
   // Last assistant message for result generation
   protected lastAssistantMessage: CLIAssistantMessage | null = null;
+
+  // Last tool result text to use as a fallback when the model produced only tool calls
+  protected lastToolResultText: string | null = null;
 
   // Track permission denials (execution denied tool calls)
   protected permissionDenials: CLIPermissionDenial[] = [];
@@ -351,6 +354,8 @@ export abstract class BaseJsonOutputAdapter {
     state.messageStarted = false;
     state.finalized = false;
     state.currentBlockType = null;
+    // Reset tool-result fallback when starting a fresh assistant message
+    this.lastToolResultText = null;
   }
 
   /**
@@ -598,6 +603,17 @@ export abstract class BaseJsonOutputAdapter {
       case GeminiEventType.ToolCallRequest:
         this.appendToolUse(state, event.value, null);
         break;
+      case GeminiEventType.ToolCallResponse: {
+        // Treat tool_call_response as assistant-visible content so that
+        // JSON output is not empty when the model returns only tool responses
+        // (e.g., retries that get tool results but no text).
+        const content = toolResultContent(event.value);
+        if (content && content.trim().length > 0) {
+          this.lastToolResultText = content;
+          this.appendText(state, content, null);
+        }
+        break;
+      }
       case GeminiEventType.Finished:
         if (event.value?.usageMetadata) {
           state.usage = this.createUsage(event.value.usageMetadata);
@@ -1010,6 +1026,9 @@ export abstract class BaseJsonOutputAdapter {
     const content = toolResultContent(response);
     if (content !== undefined) {
       block.content = content;
+      if (content.trim().length > 0) {
+        this.lastToolResultText = content;
+      }
     }
 
     const message: CLIUserMessage = {
@@ -1055,11 +1074,32 @@ export abstract class BaseJsonOutputAdapter {
     lastAssistantMessage: CLIAssistantMessage | null,
   ): CLIResultMessage {
     const usage = options.usage ?? createExtendedUsage();
+    // Prefer explicit summary, otherwise take the text from the last assistant
+    // message. If the adapter never finalized the assistant message (e.g.,
+    // upstream emitted Finished before finalize was called), fall back to the
+    // current main agent state so JSON mode still returns a non-empty result.
+    const assistantText =
+      lastAssistantMessage
+        ? extractTextFromBlocks(lastAssistantMessage.message.content)
+        : extractTextFromBlocks(this.mainAgentMessageState.blocks);
+    const assistantTextTrimmed = assistantText.trim();
+    const usingFallback =
+      assistantTextTrimmed.length === 0 && this.lastToolResultText;
+    if (
+      usingFallback &&
+      typeof (this.config as { getDebugMode?: () => boolean }).getDebugMode ===
+        'function' &&
+      this.config.getDebugMode()
+    ) {
+      console.error(
+        '[BaseJsonOutputAdapter] Using lastToolResultText fallback due to empty assistant text.',
+      );
+    }
     const resultText =
       options.summary ??
-      (lastAssistantMessage
-        ? extractTextFromBlocks(lastAssistantMessage.message.content)
-        : '');
+      (assistantTextTrimmed.length > 0
+        ? assistantText
+        : this.lastToolResultText ?? '');
 
     const baseUuid = randomUUID();
     const baseSessionId = this.getSessionId();

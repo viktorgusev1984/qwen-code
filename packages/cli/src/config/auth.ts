@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { AuthType } from '@qwen-code/qwen-code-core';
+import { AuthType } from '@psd-tech/gusqwen-core';
 import { loadEnvironment, loadSettings } from './settings.js';
 
 export function validateAuthMethod(authMethod: string): string | null {
@@ -21,7 +21,7 @@ export function validateAuthMethod(authMethod: string): string | null {
   }
 
   if (authMethod === AuthType.QWEN_OAUTH) {
-    // Qwen OAuth doesn't require any environment variables for basic setup
+    // Gus Qwen OAuth doesn't require any environment variables for basic setup
     // The OAuth flow will handle authentication
     return null;
   }

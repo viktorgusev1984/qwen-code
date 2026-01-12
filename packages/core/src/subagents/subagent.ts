@@ -371,13 +371,28 @@ export class SubAgentScope {
         };
 
         const roundStreamStart = Date.now();
-        const responseStream = await chat.sendMessageStream(
-          this.modelConfig.model ||
-            this.runtimeContext.getModel() ||
-            DEFAULT_QWEN_MODEL,
-          messageParams,
-          promptId,
-        );
+        const responseStream =
+          this.runtimeContext.getStreamingMode() !== 'stream'
+            ? (async function* (instance) {
+                yield {
+                  type: 'chunk',
+                  value: await chat.sendMessage(
+                    instance.modelConfig.model ||
+                      instance.runtimeContext.getModel() ||
+                      DEFAULT_QWEN_MODEL,
+                    messageParams,
+                    promptId,
+                  ),
+                } as const;
+              })(this)
+            : await chat.sendMessageStream(
+                this.modelConfig.model ||
+                  this.runtimeContext.getModel() ||
+                  DEFAULT_QWEN_MODEL,
+                messageParams,
+                promptId,
+              );
+
         this.eventEmitter?.emit(SubAgentEventType.ROUND_START, {
           subagentId: this.subagentId,
           round: turnCounter,

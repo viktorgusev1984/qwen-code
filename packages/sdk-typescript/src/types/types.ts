@@ -80,7 +80,7 @@ export type McpAuthProviderType =
  * - Streamable HTTP: httpUrl, headers
  * - WebSocket: tcp
  *
- * This interface aligns with MCPServerConfig in @qwen-code/qwen-code-core.
+ * This interface aligns with MCPServerConfig in @psd-tech/gusqwen-core.
  */
 export interface CLIMcpServerConfig {
   // For stdio transport
@@ -384,7 +384,7 @@ export interface QueryOptions {
   /**
    * Authentication type for the AI service.
    * - 'openai': Use OpenAI-compatible authentication
-   * - 'qwen-oauth': Use Qwen OAuth authentication
+   * - 'qwen-oauth': Use Gus Qwen OAuth authentication
    *
    * Though we support 'qwen-oauth', it's not recommended to use it in the SDK.
    * Because the credentials are stored in `~/.qwen` and may need to refresh periodically.

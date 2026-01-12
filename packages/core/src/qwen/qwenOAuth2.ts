@@ -20,7 +20,7 @@ import {
 } from './sharedTokenManager.js';
 
 // OAuth Endpoints
-const QWEN_OAUTH_BASE_URL = 'https://chat.qwen.ai';
+const QWEN_OAUTH_BASE_URL = 'https://chat.gusqwen.ai';
 
 const QWEN_OAUTH_DEVICE_CODE_ENDPOINT = `${QWEN_OAUTH_BASE_URL}/api/v1/oauth2/device/code`;
 const QWEN_OAUTH_TOKEN_ENDPOINT = `${QWEN_OAUTH_BASE_URL}/api/v1/oauth2/token`;
@@ -540,14 +540,14 @@ export async function getQwenOAuthClient(
         (() => {
           switch (result.reason) {
             case 'timeout':
-              return 'Qwen OAuth authentication timed out';
+              return 'Gus Qwen OAuth authentication timed out';
             case 'cancelled':
-              return 'Qwen OAuth authentication was cancelled by user';
+              return 'Gus Qwen OAuth authentication was cancelled by user';
             case 'rate_limit':
-              return 'Too many request for Qwen OAuth authentication, please try again later.';
+              return 'Too many request for Gus Qwen OAuth authentication, please try again later.';
             case 'error':
             default:
-              return 'Qwen OAuth authentication failed';
+              return 'Gus Qwen OAuth authentication failed';
           }
         })();
 
@@ -593,7 +593,7 @@ async function authWithQwenDeviceFlow(
     qwenOAuth2Events.emit(QwenOAuth2Event.AuthUri, deviceAuth);
 
     const showFallbackMessage = () => {
-      console.log('\n=== Qwen OAuth Device Authorization ===');
+      console.log('\n=== Gus Qwen OAuth Device Authorization ===');
       console.log(
         'Please visit the following URL in your browser to authorize:',
       );

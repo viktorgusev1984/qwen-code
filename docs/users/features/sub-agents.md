@@ -1,6 +1,6 @@
 # Subagents
 
-Subagents are specialized AI assistants that handle specific types of tasks within Qwen Code. They allow you to delegate focused work to AI agents that are configured with task-specific prompts, tools, and behaviors.
+Subagents are specialized AI assistants that handle specific types of tasks within Gus Qwen. They allow you to delegate focused work to AI agents that are configured with task-specific prompts, tools, and behaviors.
 
 ## What are Subagents?
 
@@ -118,7 +118,7 @@ new contributors and end users understand the project.
 
 ### Automatic Delegation
 
-Qwen Code proactively delegates tasks based on:
+Gus Qwen proactively delegates tasks based on:
 
 - The task description in your request
 - The description field in Subagents configurations

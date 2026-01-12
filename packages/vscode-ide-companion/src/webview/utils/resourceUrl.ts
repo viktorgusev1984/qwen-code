@@ -1,6 +1,6 @@
 /**
  * @license
- * Copyright 2025 Qwen Team
+ * Copyright 2025 Gus Qwen Team
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -46,6 +46,7 @@ function isValidWebviewUrl(url: string): boolean {
       'vscode-webview-resource:',
       'https-vscode-webview-resource:',
       'vscode-file:',
+      'file:',
       'https:',
     ];
 

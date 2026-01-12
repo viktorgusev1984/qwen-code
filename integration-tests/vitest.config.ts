@@ -1,6 +1,6 @@
 /**
  * @license
- * Copyright 2025 Qwen Team
+ * Copyright 2025 Gus Qwen Team
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -31,7 +31,7 @@ export default defineConfig({
   resolve: {
     alias: {
       // Use built SDK bundle for e2e tests
-      '@qwen-code/sdk': resolve(
+      '@psd-tech/gusqwen-sdk': resolve(
         __dirname,
         '../packages/sdk-typescript/dist/index.mjs',
       ),

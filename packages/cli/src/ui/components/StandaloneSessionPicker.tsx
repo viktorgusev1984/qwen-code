@@ -1,12 +1,12 @@
 /**
  * @license
- * Copyright 2025 Qwen Code
+ * Copyright 2025 Gus Qwen
  * SPDX-License-Identifier: Apache-2.0
  */
 
 import { useState } from 'react';
 import { render, Box, useApp } from 'ink';
-import { getGitBranch, SessionService } from '@qwen-code/qwen-code-core';
+import { getGitBranch, SessionService } from '@psd-tech/gusqwen-core';
 import { KeypressProvider } from '../contexts/KeypressContext.js';
 import { SessionPicker } from './SessionPicker.js';
 

@@ -1,6 +1,6 @@
 /**
  * @license
- * Copyright 2025 Qwen Team
+ * Copyright 2025 Gus Qwen Team
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -57,8 +57,9 @@ interface UseWebViewMessagesProps {
       files: Array<{
         id: string;
         label: string;
-        description: string;
+        description?: string;
         path: string;
+        type: 'file' | 'folder';
       }>,
     ) => void;
     addFileReference: (name: string, path: string) => void;
@@ -112,6 +113,12 @@ interface UseWebViewMessagesProps {
     } | null,
   ) => void;
 
+  // Confirmation
+  handleConfirmActionRequest?: (request: {
+    prompt: string;
+    raw: string;
+  }) => void;
+
   // Input
   inputFieldRef: React.RefObject<HTMLDivElement>;
   setInputText: (text: string) => void;
@@ -119,32 +126,17 @@ interface UseWebViewMessagesProps {
   setEditMode?: (mode: ApprovalModeValue) => void;
   // Authentication state setter
   setIsAuthenticated?: (authenticated: boolean | null) => void;
+
+  // Available commands setter
+  setAvailableCommands?: (commands: Array<Record<string, unknown>>) => void;
 }
 
 /**
  * WebView message handling Hook
  * Handles all messages from VSCode Extension uniformly
  */
-export const useWebViewMessages = ({
-  sessionManagement,
-  fileContext,
-  messageHandling,
-  handleToolCallUpdate,
-  clearToolCalls,
-  setPlanEntries,
-  handlePermissionRequest,
-  inputFieldRef,
-  setInputText,
-  setEditMode,
-  setIsAuthenticated,
-}: UseWebViewMessagesProps) => {
-  // VS Code API for posting messages back to the extension host
-  const vscode = useVSCode();
-  // Track active long-running tool calls (execute/bash/command) so we can
-  // keep the bottom "waiting" message visible until all of them complete.
-  const activeExecToolCallsRef = useRef<Set<string>>(new Set());
-  // Use ref to store callbacks to avoid useEffect dependency issues
-  const handlersRef = useRef({
+export const useWebViewMessages = (props: UseWebViewMessagesProps) => {
+  const {
     sessionManagement,
     fileContext,
     messageHandling,
@@ -152,7 +144,43 @@ export const useWebViewMessages = ({
     clearToolCalls,
     setPlanEntries,
     handlePermissionRequest,
+    handleConfirmActionRequest,
+    inputFieldRef,
+    setInputText,
+    setEditMode,
     setIsAuthenticated,
+  } = props;
+  // VS Code API for posting messages back to the extension host
+  const vscode = useVSCode();
+  // Track active long-running tool calls (execute/bash/command) so we can
+  // keep the bottom "waiting" message visible until all of them complete.
+  const activeExecToolCallsRef = useRef<Set<string>>(new Set());
+  // Define the type for the handlers object
+  type Handlers = {
+    sessionManagement: UseWebViewMessagesProps['sessionManagement'];
+    fileContext: UseWebViewMessagesProps['fileContext'];
+    messageHandling: UseWebViewMessagesProps['messageHandling'];
+    handleToolCallUpdate: UseWebViewMessagesProps['handleToolCallUpdate'];
+    clearToolCalls: UseWebViewMessagesProps['clearToolCalls'];
+    setPlanEntries: UseWebViewMessagesProps['setPlanEntries'];
+    handlePermissionRequest: UseWebViewMessagesProps['handlePermissionRequest'];
+    handleConfirmActionRequest?: UseWebViewMessagesProps['handleConfirmActionRequest'];
+    setIsAuthenticated: UseWebViewMessagesProps['setIsAuthenticated'];
+    setAvailableCommands?: UseWebViewMessagesProps['setAvailableCommands'];
+  };
+
+  // Use ref to store callbacks to avoid useEffect dependency issues
+  const handlersRef = useRef<Handlers>({
+    sessionManagement,
+    fileContext,
+    messageHandling,
+    handleToolCallUpdate,
+    clearToolCalls,
+    setPlanEntries,
+    handlePermissionRequest,
+    handleConfirmActionRequest,
+    setIsAuthenticated,
+    setAvailableCommands: props.setAvailableCommands,
   });
 
   // Track last "Updated Plan" snapshot toolcall to support merge/dedupe
@@ -197,7 +225,9 @@ export const useWebViewMessages = ({
       clearToolCalls,
       setPlanEntries,
       handlePermissionRequest,
+      handleConfirmActionRequest,
       setIsAuthenticated,
+      setAvailableCommands: props.setAvailableCommands,
     };
   });
 
@@ -248,6 +278,24 @@ export const useWebViewMessages = ({
           handlers.messageHandling.clearWaitingForResponse();
           // Set authentication state to true
           handlers.setIsAuthenticated?.(true);
+          break;
+        }
+
+        case 'confirm_action': {
+          handlers.messageHandling.clearWaitingForResponse();
+          const prompt =
+            (message?.data?.prompt as string) ||
+            'This action requires confirmation. Proceed?';
+          const raw = (message?.data?.originalInvocation?.raw as string) || '';
+          if (handlers.handleConfirmActionRequest) {
+            handlers.handleConfirmActionRequest({ prompt, raw });
+          } else {
+            handlers.messageHandling.addMessage({
+              role: 'assistant',
+              content: prompt,
+              timestamp: Date.now(),
+            });
+          }
           break;
         }
 
@@ -405,6 +453,27 @@ export const useWebViewMessages = ({
           handlers.messageHandling.clearThinking();
           activeExecToolCallsRef.current.clear();
           handlers.messageHandling.clearWaitingForResponse();
+          {
+            const errorData = message.data as
+              | { message?: string; error?: unknown }
+              | undefined;
+            const rawMessage =
+              errorData?.message ??
+              (typeof errorData?.error === 'string'
+                ? errorData.error
+                : errorData?.error instanceof Error
+                  ? errorData.error.message
+                  : '');
+            const errorMessage =
+              rawMessage && rawMessage.trim()
+                ? rawMessage
+                : 'Request failed. Please check CLI logs for details.';
+            handlers.messageHandling.addMessage({
+              role: 'assistant',
+              content: `Error: ${errorMessage}`,
+              timestamp: Date.now(),
+            });
+          }
           break;
 
         case 'permissionRequest': {
@@ -447,17 +516,24 @@ export const useWebViewMessages = ({
                 | { path?: string; oldText?: string; newText?: string }
                 | undefined;
 
+              const oldText =
+                diffContent?.oldText === undefined ||
+                diffContent?.oldText === null
+                  ? ''
+                  : diffContent.oldText;
+              const newText = diffContent?.newText;
+
               if (
                 diffContent?.path &&
-                diffContent?.oldText !== undefined &&
-                diffContent?.newText !== undefined
+                newText !== undefined &&
+                newText !== null
               ) {
                 vscode.postMessage({
                   type: 'openDiff',
                   data: {
                     path: diffContent.path,
-                    oldText: diffContent.oldText,
-                    newText: diffContent.newText,
+                    oldText,
+                    newText,
                   },
                 });
               }
@@ -575,6 +651,23 @@ export const useWebViewMessages = ({
             }
           }
           break;
+
+        case 'compression': {
+          const info = message.data as {
+            originalTokenCount?: number;
+            newTokenCount?: number;
+          };
+          handlers.messageHandling.addMessage({
+            role: 'assistant',
+            content:
+              `IMPORTANT: This conversation approached the input token limit. ` +
+              `A compressed context will be sent for future messages (compressed from: ` +
+              `${info.originalTokenCount ?? 'unknown'} to ` +
+              `${info.newTokenCount ?? 'unknown'} tokens).`,
+            timestamp: Date.now(),
+          });
+          break;
+        }
 
         case 'toolCall':
         case 'toolCallUpdate': {
@@ -737,7 +830,7 @@ export const useWebViewMessages = ({
           // Reset the VS Code tab title to default label
           vscode.postMessage({
             type: 'updatePanelTitle',
-            data: { title: 'Qwen Code' },
+            data: { title: 'Gus Qwen' },
           });
           lastPlanSnapshotRef.current = null;
           break;
@@ -802,8 +895,9 @@ export const useWebViewMessages = ({
           const files = message.data?.files as Array<{
             id: string;
             label: string;
-            description: string;
+            description?: string;
             path: string;
+            type: 'file' | 'folder';
           }>;
           if (files) {
             console.log('[WebView] Received workspaceFiles:', files.length);
@@ -829,11 +923,33 @@ export const useWebViewMessages = ({
           });
           break;
 
+        case 'available_commands_update':
+          // Handle available commands update from CLI
+          console.log(
+            '[useWebViewMessages] Received available_commands_update message:',
+            message,
+          );
+          if (
+            props.setAvailableCommands &&
+            Array.isArray(message.data.commands)
+          ) {
+            props.setAvailableCommands(message.data.commands);
+          } else {
+            console.log(
+              '[useWebViewMessages] setAvailableCommands is not a function or commands is not an array',
+              {
+                setAvailableCommands: typeof props.setAvailableCommands,
+                commands: message.data.commands,
+              },
+            );
+          }
+          break;
+
         default:
           break;
       }
     },
-    [inputFieldRef, setInputText, vscode, setEditMode],
+    [inputFieldRef, setInputText, vscode, setEditMode, props],
   );
 
   useEffect(() => {

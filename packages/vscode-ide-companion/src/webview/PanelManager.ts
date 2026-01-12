@@ -1,6 +1,6 @@
 /**
  * @license
- * Copyright 2025 Qwen Team
+ * Copyright 2025 Gus Qwen Team
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -47,17 +47,17 @@ export class PanelManager {
       return false; // Panel already exists
     }
 
-    // First, check if there's an existing Qwen Code group
+    // First, check if there's an existing Gus Qwen group
     const existingGroup = this.findExistingQwenCodeGroup();
 
     if (existingGroup) {
-      // If Qwen Code webview already exists in a locked group, create the new panel in that same group
+      // If Gus Qwen webview already exists in a locked group, create the new panel in that same group
       console.log(
-        '[PanelManager] Found existing Qwen Code group, creating panel in same group',
+        '[PanelManager] Found existing Gus Qwen group, creating panel in same group',
       );
       this.panel = vscode.window.createWebviewPanel(
-        'qwenCode.chat',
-        'Qwen Code',
+        'gusqwen.chat',
+        'Gus Qwen',
         { viewColumn: existingGroup.viewColumn, preserveFocus: false },
         {
           enableScripts: true,
@@ -71,7 +71,7 @@ export class PanelManager {
       // Track the group column hosting this panel
       this.panelGroupViewColumn = existingGroup.viewColumn;
     } else {
-      // If no existing Qwen Code group, create a new group to the right of the active editor group
+      // If no existing Gus Qwen group, create a new group to the right of the active editor group
       try {
         // Create a new group to the right of the current active group
         await vscode.commands.executeCommand('workbench.action.newGroupRight');
@@ -84,8 +84,8 @@ export class PanelManager {
         const activeColumn =
           vscode.window.activeTextEditor?.viewColumn || vscode.ViewColumn.One;
         this.panel = vscode.window.createWebviewPanel(
-          'qwenCode.chat',
-          'Qwen Code',
+          'gusqwen.chat',
+          'Gus Qwen',
           { viewColumn: activeColumn, preserveFocus: false },
           {
             enableScripts: true,
@@ -105,8 +105,8 @@ export class PanelManager {
       const newGroupColumn = vscode.window.tabGroups.activeTabGroup.viewColumn;
 
       this.panel = vscode.window.createWebviewPanel(
-        'qwenCode.chat',
-        'Qwen Code',
+        'gusqwen.chat',
+        'Gus Qwen',
         { viewColumn: newGroupColumn, preserveFocus: false },
         {
           enableScripts: true,
@@ -140,7 +140,7 @@ export class PanelManager {
   }
 
   /**
-   * Find the group and view column where the existing Qwen Code webview is located
+   * Find the group and view column where the existing Gus Qwen webview is located
    * @returns The found group and view column, or undefined if not found
    */
   private findExistingQwenCodeGroup():
@@ -154,10 +154,10 @@ export class PanelManager {
 
         if (
           isWebviewInput(input) &&
-          input.viewType === 'mainThreadWebview-qwenCode.chat'
+          input.viewType === 'mainThreadWebview-gusqwen.chat'
         ) {
-          // Found an existing Qwen Code tab
-          console.log('[PanelManager] Found existing Qwen Code group:', {
+          // Found an existing Gus Qwen tab
+          console.log('[PanelManager] Found existing Gus Qwen group:', {
             viewColumn: group.viewColumn,
             tabCount: group.tabs.length,
             isActive: group.isActive,
@@ -233,7 +233,7 @@ export class PanelManager {
         const isWebviewInput = (inp: unknown): inp is { viewType: string } =>
           !!inp && typeof inp === 'object' && 'viewType' in inp;
         const isWebview = isWebviewInput(input);
-        const sameViewType = isWebview && input.viewType === 'qwenCode.chat';
+        const sameViewType = isWebview && input.viewType === 'gusqwen.chat';
         const sameLabel = t.label === this.panel!.title;
         return !!(sameViewType || sameLabel);
       });

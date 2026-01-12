@@ -1,6 +1,6 @@
 /**
  * @license
- * Copyright 2025 Qwen Team
+ * Copyright 2025 Gus Qwen Team
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -17,7 +17,7 @@ import {
   isSDKAssistantMessage,
   isSDKSystemMessage,
   type SDKMessage,
-} from '@qwen-code/sdk';
+} from '@psd-tech/gusqwen-sdk';
 import {
   SDKTestHelper,
   extractText,

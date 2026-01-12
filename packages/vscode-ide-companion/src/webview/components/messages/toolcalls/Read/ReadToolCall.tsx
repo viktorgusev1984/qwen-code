@@ -1,13 +1,13 @@
 /**
  * @license
- * Copyright 2025 Qwen Team
+ * Copyright 2025 Gus Qwen Team
  * SPDX-License-Identifier: Apache-2.0
  *
  * Read tool call component - specialized for file reading operations
  */
 
 import type React from 'react';
-import { useCallback, useEffect, useMemo } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { BaseToolCallProps } from '../shared/types.js';
 import {
   groupContent,
@@ -55,9 +55,13 @@ export const ToolCallContainer: React.FC<ToolCallContainerProps> = ({
 export const ReadToolCall: React.FC<BaseToolCallProps> = ({ toolCall }) => {
   const { content, locations, toolCallId } = toolCall;
   const vscode = useVSCode();
+  const [expanded, setExpanded] = useState(false);
 
   // Group content by type; memoize to avoid new array identities on every render
-  const { errors, diffs } = useMemo(() => groupContent(content), [content]);
+  const { errors, diffs, textOutputs } = useMemo(
+    () => groupContent(content),
+    [content],
+  );
 
   // Post a message to the extension host to open a VS Code diff tab
   const handleOpenDiffInternal = useCallback(
@@ -90,6 +94,10 @@ export const ReadToolCall: React.FC<BaseToolCallProps> = ({ toolCall }) => {
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [toolCallId]);
+
+  useEffect(() => {
+    setExpanded(false);
   }, [toolCallId]);
 
   // Compute container status based on toolCall.status (pending/in_progress -> loading)
@@ -144,6 +152,61 @@ export const ReadToolCall: React.FC<BaseToolCallProps> = ({ toolCall }) => {
         }
       >
         {null}
+      </ToolCallContainer>
+    );
+  }
+
+  // Success or error with output: show content preview
+  if (textOutputs.length > 0) {
+    const path = locations?.[0]?.path || '';
+    const output = textOutputs.join('\n');
+    const maxLines = 5;
+    const maxChars = 800;
+    const lines = output.split('\n');
+    const isLong = lines.length > maxLines || output.length > maxChars;
+    let collapsedOutput = output;
+    if (isLong) {
+      collapsedOutput = lines.slice(0, maxLines).join('\n');
+      if (collapsedOutput.length > maxChars) {
+        collapsedOutput = collapsedOutput.slice(0, maxChars);
+      }
+      collapsedOutput = `${collapsedOutput}\n...`;
+    }
+    const displayOutput = expanded || !isLong ? output : collapsedOutput;
+    const outputClass =
+      toolCall.status === 'failed'
+        ? 'read-tool-call-error'
+        : 'read-tool-call-success';
+    return (
+      <ToolCallContainer
+        label={'Read'}
+        className={outputClass}
+        status={containerStatus}
+        toolCallId={toolCallId}
+        labelSuffix={
+          path ? (
+            <FileLink
+              path={path}
+              showFullPath={false}
+              className="text-xs font-mono text-[var(--app-secondary-foreground)] hover:underline"
+            />
+          ) : undefined
+        }
+      >
+        <div className="bg-[var(--app-input-background)] border border-[var(--app-input-border)] rounded-md p-3 mt-1">
+          <pre className="font-mono text-[13px] whitespace-pre-wrap break-words text-[var(--app-primary-foreground)] opacity-90">
+            {displayOutput}
+          </pre>
+        </div>
+        {isLong && (
+          <button
+            type="button"
+            className="mt-1 text-xs text-[var(--app-secondary-foreground)] underline opacity-80 hover:opacity-100"
+            onClick={() => setExpanded((prev) => !prev)}
+          >
+            {expanded ? 'Show less' : 'Show more'}
+          </button>
+        )}
       </ToolCallContainer>
     );
   }

@@ -23,6 +23,16 @@ function writeJson(filePath, data) {
   writeFileSync(filePath, JSON.stringify(data, null, 2) + '\n');
 }
 
+function replaceInFile(filePath, pattern, replacement) {
+  const contents = readFileSync(filePath, 'utf-8');
+  const next = contents.replace(pattern, replacement);
+  if (contents === next) {
+    console.warn(`Warning: no changes applied to ${filePath}`);
+  } else {
+    writeFileSync(filePath, next);
+  }
+}
+
 // 1. Get the version from the command line arguments.
 const versionType = process.argv[2];
 if (!versionType) {
@@ -103,7 +113,18 @@ if (cliPackageJson.config?.sandboxImageUri) {
   writeJson(cliPackageJsonPath, cliPackageJson);
 }
 
-// 7. Run `npm install` to update package-lock.json.
+// 7. Update IntelliJ plugin version.
+const intellijGradlePropsPath = resolve(
+  process.cwd(),
+  'packages/intellij-ide-companion/gradle.properties',
+);
+replaceInFile(
+  intellijGradlePropsPath,
+  /^pluginVersion=.*$/m,
+  `pluginVersion=${newVersion}`,
+);
+
+// 8. Run `npm install` to update package-lock.json.
 run(
   'npm install --workspace packages/cli --workspace packages/core --package-lock-only',
 );

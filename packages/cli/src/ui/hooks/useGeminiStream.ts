@@ -15,11 +15,13 @@ import type {
   ServerGeminiStreamEvent as GeminiEvent,
   ThoughtSummary,
   ToolCallRequestInfo,
+  ToolCallResponseInfo,
   GeminiErrorEventValue,
-} from '@qwen-code/qwen-code-core';
+} from '@psd-tech/gusqwen-core';
 import {
   GeminiEventType as ServerGeminiEventType,
   getErrorMessage,
+  getResponseTextFromParts,
   isNodeError,
   MessageSenderType,
   logUserPrompt,
@@ -34,7 +36,7 @@ import {
   ToolConfirmationOutcome,
   logApiCancel,
   ApiCancelEvent,
-} from '@qwen-code/qwen-code-core';
+} from '@psd-tech/gusqwen-core';
 import { type Part, type PartListUnion, FinishReason } from '@google/genai';
 import type {
   HistoryItem,
@@ -71,14 +73,87 @@ enum StreamProcessingStatus {
   Error,
 }
 
-const EDIT_TOOL_NAMES = new Set(['replace', 'write_file']);
+async function* bufferGeminiEvents(
+  stream: AsyncIterable<GeminiEvent>,
+): AsyncGenerator<GeminiEvent> {
+  let bufferedContent = '';
+  for await (const event of stream) {
+    if (event.type === ServerGeminiEventType.Content) {
+      bufferedContent += event.value;
+      continue;
+    }
+    if (bufferedContent) {
+      yield {
+        type: ServerGeminiEventType.Content,
+        value: bufferedContent,
+      } as GeminiEvent;
+      bufferedContent = '';
+    }
+    yield event;
+  }
+  if (bufferedContent) {
+    yield {
+      type: ServerGeminiEventType.Content,
+      value: bufferedContent,
+    } as GeminiEvent;
+  }
+}
 
+const EDIT_TOOL_NAMES = new Set(['replace', 'write_file']);
 function showCitations(settings: LoadedSettings): boolean {
   const enabled = settings?.merged?.ui?.showCitations;
   if (enabled !== undefined) {
     return enabled;
   }
   return true;
+}
+
+function formatPromptSnippet(prompt: unknown): string | null {
+  if (prompt === undefined || prompt === null) {
+    return null;
+  }
+  const raw =
+    typeof prompt === 'string' ? prompt : JSON.stringify(prompt as unknown);
+  const condensed = raw.replace(/\s+/g, ' ').trim();
+  if (!condensed) {
+    return null;
+  }
+  const safe = condensed.replace(/'/g, '’');
+  return safe.length > 140 ? `${safe.slice(0, 140)}...` : safe;
+}
+
+function buildMissingToolHint(
+  responseText: string,
+  toolRequest?: ToolCallRequestInfo | null,
+): string | null {
+  if (toolRequest) {
+    const args = toolRequest.args ?? {};
+    const subagentType =
+      (typeof args['subagent_type'] === 'string' && args['subagent_type']) ||
+      (typeof args['subagentType'] === 'string' && args['subagentType']);
+    if (subagentType) {
+      const promptSnippet = formatPromptSnippet(args['prompt']);
+      return `Инструмент '${toolRequest.name}' недоступен (subagent=${subagentType}). ` +
+        `Используйте вместо него инструмент 'task' с subagent_type='${subagentType}'` +
+        (promptSnippet ? ` и prompt='${promptSnippet}'` : '') +
+        `, а '${toolRequest.name}' и shell больше не применяйте для этой задачи.`;
+    }
+  }
+
+  const patterns = [
+    /инструмент\s+'([^']+)'\s+не найден/i,
+    /tool\s+'([^']+)'\s+(?:is not found|not found|does not exist)/i,
+  ];
+
+  for (const pattern of patterns) {
+    const match = pattern.exec(responseText);
+    if (match && match[1]) {
+      const toolName = match[1];
+      return `Инструмент '${toolName}' недоступен, пожалуйста, выберите другой инструмент или shell и не пытайтесь использовать '${toolName}' снова.`;
+    }
+  }
+
+  return null;
 }
 
 /**
@@ -123,6 +198,7 @@ export const useGeminiStream = (
   const [pendingHistoryItem, pendingHistoryItemRef, setPendingHistoryItem] =
     useStateAndRef<HistoryItemWithoutId | null>(null);
   const processedMemoryToolsRef = useRef<Set<string>>(new Set());
+  const missingToolHintRef = useRef<string | null>(null);
   const {
     startNewPrompt,
     getPromptCount,
@@ -178,7 +254,7 @@ export const useGeminiStream = (
     return undefined;
   }, [toolCalls]);
 
-  const loopDetectedRef = useRef(false);
+  const loopDetectedRef = useRef<string | null | undefined>(undefined);
   const [
     loopDetectionConfirmationRequest,
     setLoopDetectionConfirmationRequest,
@@ -361,6 +437,36 @@ export const useGeminiStream = (
             case 'submit_prompt': {
               localQueryToSendToGemini = slashCommandResult.content;
 
+              const allowAtProcessing =
+                'allowAtProcessing' in slashCommandResult
+                  ? slashCommandResult.allowAtProcessing !== false
+                  : true;
+
+              if (
+                allowAtProcessing &&
+                typeof localQueryToSendToGemini === 'string' &&
+                isAtCommand(localQueryToSendToGemini)
+              ) {
+                const atCommandResult = await handleAtCommand({
+                  query: localQueryToSendToGemini,
+                  config,
+                  addItem,
+                  onDebugMessage,
+                  messageId: userMessageTimestamp,
+                  signal: abortSignal,
+                });
+
+                addItem(
+                  { type: MessageType.USER, text: trimmedQuery },
+                  userMessageTimestamp,
+                );
+
+                if (!atCommandResult.shouldProceed) {
+                  return { queryToSend: null, shouldProceed: false };
+                }
+                localQueryToSendToGemini = atCommandResult.processedQuery;
+              }
+
               return {
                 queryToSend: localQueryToSendToGemini,
                 shouldProceed: true,
@@ -496,61 +602,6 @@ export const useGeminiStream = (
     [addItem, pendingHistoryItemRef, setPendingHistoryItem],
   );
 
-  const mergeThought = useCallback(
-    (incoming: ThoughtSummary) => {
-      setThought((prev) => {
-        if (!prev) {
-          return incoming;
-        }
-        const subject = incoming.subject || prev.subject;
-        const description = `${prev.description ?? ''}${incoming.description ?? ''}`;
-        return { subject, description };
-      });
-    },
-    [setThought],
-  );
-
-  const handleThoughtEvent = useCallback(
-    (
-      eventValue: ThoughtSummary,
-      currentThoughtBuffer: string,
-      userMessageTimestamp: number,
-    ): string => {
-      if (turnCancelledRef.current) {
-        return '';
-      }
-
-      // Extract the description text from the thought summary
-      const thoughtText = eventValue.description ?? '';
-      if (!thoughtText) {
-        return currentThoughtBuffer;
-      }
-
-      const newThoughtBuffer = currentThoughtBuffer + thoughtText;
-
-      // If we're not already showing a thought, start a new one
-      if (pendingHistoryItemRef.current?.type !== 'gemini_thought') {
-        // If there's a pending non-thought item, finalize it first
-        if (pendingHistoryItemRef.current) {
-          addItem(pendingHistoryItemRef.current, userMessageTimestamp);
-        }
-        setPendingHistoryItem({ type: 'gemini_thought', text: '' });
-      }
-
-      // Update the existing thought message with accumulated content
-      setPendingHistoryItem({
-        type: 'gemini_thought',
-        text: newThoughtBuffer,
-      });
-
-      // Also update the thought state for the loading indicator
-      mergeThought(eventValue);
-
-      return newThoughtBuffer;
-    },
-    [addItem, pendingHistoryItemRef, setPendingHistoryItem, mergeThought],
-  );
-
   const handleUserCancelledEvent = useCallback(
     (userMessageTimestamp: number) => {
       if (turnCancelledRef.current) {
@@ -606,6 +657,69 @@ export const useGeminiStream = (
       setThought(null); // Reset thought when there's an error
     },
     [addItem, pendingHistoryItemRef, setPendingHistoryItem, config, setThought],
+  );
+
+  const handleToolCallResponseEvent = useCallback(
+    (eventValue: ToolCallResponseInfo, userMessageTimestamp: number) => {
+      if (pendingHistoryItemRef.current) {
+        addItem(pendingHistoryItemRef.current, userMessageTimestamp);
+        setPendingHistoryItem(null);
+      }
+
+      const responseText =
+        (typeof eventValue.resultDisplay === 'string'
+          ? eventValue.resultDisplay.trim()
+          : undefined) ||
+        getResponseTextFromParts(eventValue.responseParts ?? []) ||
+        eventValue.error?.message ||
+        'Tool reported no message.';
+
+      if (!responseText) {
+        return;
+      }
+
+      addItem(
+        {
+          type: MessageType.INFO,
+          text: responseText,
+        },
+        userMessageTimestamp,
+      );
+
+      onDebugMessage(
+        `ToolCallResponse for ${eventValue.callId}: ${responseText}`,
+      );
+
+      if (!missingToolHintRef.current) {
+        const toolHint = buildMissingToolHint(
+          responseText,
+          eventValue.toolRequest,
+        );
+        if (toolHint) {
+          missingToolHintRef.current = toolHint;
+        }
+      }
+
+
+      const historyParts =
+        eventValue.responseParts && eventValue.responseParts.length > 0
+          ? eventValue.responseParts
+          : [{ text: responseText }];
+
+      if (geminiClient && historyParts.length) {
+        void geminiClient.addHistory({
+          role: 'user',
+          parts: historyParts,
+        });
+      }
+    },
+    [
+      addItem,
+      pendingHistoryItemRef,
+      setPendingHistoryItem,
+      onDebugMessage,
+      geminiClient,
+    ],
   );
 
   const handleCitationEvent = useCallback(
@@ -724,6 +838,41 @@ export const useGeminiStream = (
     [addItem],
   );
 
+  const handleRetryEvent = useCallback(
+    (
+      retryCount: number,
+      userMessageTimestamp: number,
+      debugDetails: {
+        bufferedContentLength: number;
+        pendingToolCalls: number;
+        lastEventSummary: string;
+        bufferPreview?: string;
+      },
+    ) => {
+      if (pendingHistoryItemRef.current) {
+        addItem(pendingHistoryItemRef.current, userMessageTimestamp);
+        setPendingHistoryItem(null);
+      }
+
+      const previewInfo = debugDetails.bufferPreview
+        ? ` preview="${debugDetails.bufferPreview}"`
+        : '';
+
+      onDebugMessage(
+        `Retry ${retryCount} triggered. bufferedContentLength=${debugDetails.bufferedContentLength}, pendingToolCalls=${debugDetails.pendingToolCalls}, lastEvent=${debugDetails.lastEventSummary}.${previewInfo} Clearing buffered content and waiting for next attempt.`,
+      );
+
+      addItem(
+        {
+          type: MessageType.INFO,
+          text: `Empty response from the model, retrying${retryCount > 1 ? ` (attempt ${retryCount})` : ''}...`,
+        },
+        userMessageTimestamp,
+      );
+    },
+    [addItem, onDebugMessage, pendingHistoryItemRef, setPendingHistoryItem],
+  );
+
   const handleLoopDetectionConfirmation = useCallback(
     (result: { userSelection: 'disable' | 'keep' }) => {
       setLoopDetectionConfirmationRequest(null);
@@ -750,12 +899,25 @@ export const useGeminiStream = (
     [config, addItem],
   );
 
-  const handleLoopDetectedEvent = useCallback(() => {
-    // Show the confirmation dialog to choose whether to disable loop detection
-    setLoopDetectionConfirmationRequest({
-      onComplete: handleLoopDetectionConfirmation,
-    });
-  }, [handleLoopDetectionConfirmation]);
+  const handleLoopDetectedEvent = useCallback(
+    (loopType?: string | null) => {
+      if (loopType === 'consecutive_identical_tool_calls') {
+        addItem(
+          {
+            type: MessageType.INFO,
+            text: 'Repeated use of the same tool was detected. Consider trying a different search approach to gather new information.',
+          },
+          Date.now(),
+        );
+      }
+
+      // Show the confirmation dialog to choose whether to disable loop detection
+      setLoopDetectionConfirmationRequest({
+        onComplete: handleLoopDetectionConfirmation,
+      });
+    },
+    [addItem, handleLoopDetectionConfirmation],
+  );
 
   const processGeminiStreamEvents = useCallback(
     async (
@@ -764,22 +926,14 @@ export const useGeminiStream = (
       signal: AbortSignal,
     ): Promise<StreamProcessingStatus> => {
       let geminiMessageBuffer = '';
-      let thoughtBuffer = '';
       const toolCallRequests: ToolCallRequestInfo[] = [];
+      let retryCount = 0;
+      let lastEventSummary = 'none';
       for await (const event of stream) {
         switch (event.type) {
           case ServerGeminiEventType.Thought:
-            // If the thought has a subject, it's a discrete status update rather than
-            // a streamed textual thought, so we update the thought state directly.
-            if (event.value.subject) {
-              setThought(event.value);
-            } else {
-              thoughtBuffer = handleThoughtEvent(
-                event.value,
-                thoughtBuffer,
-                userMessageTimestamp,
-              );
-            }
+            setThought(event.value);
+            lastEventSummary = 'thought';
             break;
           case ServerGeminiEventType.Content:
             geminiMessageBuffer = handleContentEvent(
@@ -787,45 +941,72 @@ export const useGeminiStream = (
               geminiMessageBuffer,
               userMessageTimestamp,
             );
+            lastEventSummary = `content len=${event.value.length}`;
             break;
           case ServerGeminiEventType.ToolCallRequest:
             toolCallRequests.push(event.value);
+            lastEventSummary = 'tool_call_request';
             break;
           case ServerGeminiEventType.UserCancelled:
             handleUserCancelledEvent(userMessageTimestamp);
+            lastEventSummary = 'user_cancelled';
             break;
           case ServerGeminiEventType.Error:
             handleErrorEvent(event.value, userMessageTimestamp);
+            lastEventSummary = 'error_event';
             break;
           case ServerGeminiEventType.ChatCompressed:
             handleChatCompressionEvent(event.value, userMessageTimestamp);
+            lastEventSummary = 'chat_compressed';
             break;
           case ServerGeminiEventType.ToolCallConfirmation:
+            lastEventSummary = event.type;
+            break;
           case ServerGeminiEventType.ToolCallResponse:
-            // do nothing
+            handleToolCallResponseEvent(event.value, userMessageTimestamp);
+            lastEventSummary = event.type;
             break;
           case ServerGeminiEventType.MaxSessionTurns:
             handleMaxSessionTurnsEvent();
+            lastEventSummary = 'max_session_turns';
             break;
           case ServerGeminiEventType.SessionTokenLimitExceeded:
             handleSessionTokenLimitExceededEvent(event.value);
+            lastEventSummary = 'session_token_limit_exceeded';
             break;
           case ServerGeminiEventType.Finished:
             handleFinishedEvent(
               event as ServerGeminiFinishedEvent,
               userMessageTimestamp,
             );
+            lastEventSummary = 'finished';
             break;
           case ServerGeminiEventType.Citation:
             handleCitationEvent(event.value, userMessageTimestamp);
+            lastEventSummary = 'citation';
             break;
           case ServerGeminiEventType.LoopDetected:
             // handle later because we want to move pending history to history
             // before we add loop detected message to history
-            loopDetectedRef.current = true;
+            loopDetectedRef.current =
+              geminiClient.getLoopDetectionService().getLastDetectedLoopType();
+            lastEventSummary = 'loop_detected';
             break;
           case ServerGeminiEventType.Retry:
-            // Will add the missing logic later
+            retryCount += 1;
+            const bufferedContentLength = geminiMessageBuffer.length;
+            const pendingToolCalls = toolCallRequests.length;
+            const bufferPreview = bufferedContentLength
+              ? geminiMessageBuffer.slice(0, 200)
+              : undefined;
+            geminiMessageBuffer = '';
+            toolCallRequests.length = 0; // avoid scheduling stale tool requests from failed attempts
+            handleRetryEvent(retryCount, userMessageTimestamp, {
+              bufferedContentLength,
+              pendingToolCalls,
+              lastEventSummary,
+              bufferPreview,
+            });
             break;
           default: {
             // enforces exhaustive switch-case
@@ -841,7 +1022,6 @@ export const useGeminiStream = (
     },
     [
       handleContentEvent,
-      handleThoughtEvent,
       handleUserCancelledEvent,
       handleErrorEvent,
       scheduleToolCalls,
@@ -849,8 +1029,10 @@ export const useGeminiStream = (
       handleFinishedEvent,
       handleMaxSessionTurnsEvent,
       handleSessionTokenLimitExceededEvent,
+      handleToolCallResponseEvent,
       handleCitationEvent,
-      setThought,
+      handleRetryEvent,
+      geminiClient,
     ],
   );
 
@@ -919,9 +1101,9 @@ export const useGeminiStream = (
 
         const finalQueryToSend = queryToSend;
 
-        if (!options?.isContinuation) {
-          // trigger new prompt event for session stats in CLI
-          startNewPrompt();
+      if (!options?.isContinuation) {
+        // trigger new prompt event for session stats in CLI
+        startNewPrompt();
 
           // log user prompt event for telemetry, only text prompts for now
           if (typeof queryToSend === 'string') {
@@ -944,12 +1126,22 @@ export const useGeminiStream = (
         setInitError(null);
 
         try {
-          const stream = geminiClient.sendMessageStream(
-            finalQueryToSend,
-            abortSignal,
-            prompt_id!,
-            options,
-          );
+          const shouldStream = config.shouldStreamResponses();
+          const stream = shouldStream
+            ? geminiClient.sendMessageStream(
+                finalQueryToSend,
+                abortSignal,
+                prompt_id!,
+                options,
+              )
+            : bufferGeminiEvents(
+                geminiClient.sendMessageSync(
+                  finalQueryToSend,
+                  abortSignal,
+                  prompt_id!,
+                  options,
+                ),
+              );
           const processingStatus = await processGeminiStreamEvents(
             stream,
             userMessageTimestamp,
@@ -969,9 +1161,10 @@ export const useGeminiStream = (
             addItem(pendingHistoryItemRef.current, userMessageTimestamp);
             setPendingHistoryItem(null);
           }
-          if (loopDetectedRef.current) {
-            loopDetectedRef.current = false;
-            handleLoopDetectedEvent();
+          if (loopDetectedRef.current !== undefined) {
+            const detectedLoopType = loopDetectedRef.current;
+            loopDetectedRef.current = undefined;
+            handleLoopDetectedEvent(detectedLoopType);
           }
 
           // Restore original model if it was temporarily overridden
@@ -1001,6 +1194,19 @@ export const useGeminiStream = (
         } finally {
           setIsResponding(false);
           isSubmittingQueryRef.current = false;
+          const hintText = missingToolHintRef.current;
+          if (hintText) {
+            missingToolHintRef.current = null;
+            const scheduleHint = () => {
+              if (isSubmittingQueryRef.current) {
+                setTimeout(scheduleHint, 100);
+                return;
+              }
+              onDebugMessage(`Auto-submitting hint to model: ${hintText}`);
+              void submitQuery(hintText, { isContinuation: true });
+            };
+            setTimeout(scheduleHint, 0);
+          }
         }
       });
     },
@@ -1021,6 +1227,7 @@ export const useGeminiStream = (
       handleLoopDetectedEvent,
       handleVisionSwitch,
       restoreOriginalModel,
+      onDebugMessage,
     ],
   );
 

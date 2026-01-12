@@ -135,7 +135,7 @@ export function getCoreSystemPrompt(
   const basePrompt = systemMdEnabled
     ? fs.readFileSync(systemMdPath, 'utf8')
     : `
-You are Qwen Code, an interactive CLI agent developed by Alibaba Group, specializing in software engineering tasks. Your primary goal is to help users safely and efficiently, adhering strictly to the following instructions and utilizing your available tools.
+You are Gus Qwen, an interactive CLI agent developed by Alibaba Group, specializing in software engineering tasks. Your primary goal is to help users safely and efficiently, adhering strictly to the following instructions and utilizing your available tools.
 
 # Core Mandates
 
@@ -353,7 +353,19 @@ First, you will think through the entire history in a private <scratchpad>. Revi
 
 After your reasoning is complete, generate the final <state_snapshot> XML object. Be incredibly dense with information. Omit any irrelevant conversational filler.
 
-The structure MUST be as follows:
+    STRICT LOG/NOISE GUIDELINES (VERY IMPORTANT):
+    - Ignore non-informative build noise completely: progress bars, download/transfer updates, percent bars, repeated timestamps, ANSI color sequences, and \r-based redraws.
+    - Treat any sections prefixed with [[build-log:summary]] as already denoised. Do NOT reconstruct the original log; only extract key failures/warnings/exceptions, command that produced them, exit code, and minimal context.
+    - From large build logs (Maven/Gradle/npm/etc.) keep ONLY signal:
+    * First error lines, WARN/ERROR blocks, "BUILD FAILURE"/"TEST FAILURES" summaries.
+    * Command invoked (e.g., \`mvn -B -DskipTests package\`), module/artifact identifiers, versions.
+    * Test names/classes that failed, counts (passed/failed/skipped), and top 3–5 stack frames (max).
+    * File:line snippets near the failure (≤ 3 lines of context).
+    - NEVER include progress spinners, transfer byte counters, or long repeated sections. Collapse duplicates like "X repeated N times".
+    - Cap verbosity: for any single incident keep ≤ 20 lines; across the snapshot keep diagnostics concise and aggregated.
+    - Strip ANSI/escape codes; remove binary/base64 blobs; do not paste huge traces.
+
+    STRUCTURE (MUST MATCH EXACTLY):
 
 <state_snapshot>
     <overall_goal>
@@ -400,6 +412,11 @@ The structure MUST be as follows:
         -->
     </current_plan>
 </state_snapshot>
+
+    OUTPUT RULES:
+    - Produce ONLY the <state_snapshot> XML (no scratchpad, no extra prose).
+      - Be compact, factual, and avoid filler.
+      - Deduplicate repeated points; prefer aggregates and counts over raw dumps.
 `.trim();
 }
 
@@ -784,7 +801,16 @@ function getToolCallExamples(model?: string): string {
   // Enhanced regex-based model detection
   if (model && model.length < 100) {
     // Match qwen*-coder patterns (e.g., qwen3-coder, qwen2.5-coder, qwen-coder)
+    if (/tgpt\/qwen[^-]*-coder/i.test(model)) {
+      return qwenCoderToolCallExamples;
+    }
     if (/qwen[^-]*-coder/i.test(model)) {
+      return qwenCoderToolCallExamples;
+    }
+    if (/qwen[^-]*-next/i.test(model)) {
+      return qwenCoderToolCallExamples;
+    }
+    if (/tgpt\/qwen[^-]*-next/i.test(model)) {
       return qwenCoderToolCallExamples;
     }
     // Match qwen*-vl patterns (e.g., qwen-vl, qwen2-vl, qwen3-vl)

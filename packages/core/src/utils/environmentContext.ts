@@ -59,11 +59,17 @@ export async function getEnvironmentContext(config: Config): Promise<Part[]> {
   });
   const platform = process.platform;
   const directoryContext = await getDirectoryContextString(config);
+  const channel =
+    typeof config.getChannel === 'function' ? config.getChannel() : undefined;
+  const ideChannelLine = channel
+    ? `IDE integration channel: ${formatIdeChannel(channel)}`
+    : '';
 
   const context = `
-This is the Qwen Code. We are setting up the context for our chat.
+This is the Gus Qwen. We are setting up the context for our chat.
 Today's date is ${today} (formatted according to the user's locale).
 My operating system is: ${platform}
+${ideChannelLine ? `${ideChannelLine}` : ''}
 ${directoryContext}
         `.trim();
 
@@ -106,6 +112,21 @@ ${directoryContext}
   }
 
   return initialParts;
+}
+
+function formatIdeChannel(channel: string): string {
+  switch (channel) {
+    case 'VSCode':
+      return 'VS Code';
+    case 'JetBrains':
+      return 'JetBrains IDE';
+    case 'ACP':
+    case 'SDK':
+    case 'CI':
+      return channel;
+    default:
+      return channel;
+  }
 }
 
 export async function getInitialChatHistory(

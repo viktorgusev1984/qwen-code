@@ -141,7 +141,7 @@ export class IdeClient {
     if (!this.currentIde) {
       this.setState(
         IDEConnectionStatus.Disconnected,
-        `IDE integration is not supported in your current environment. To use this feature, run Qwen Code in one of these supported IDEs: VS Code or VS Code forks`,
+        `IDE integration is not supported in your current environment. To use this feature, run Gus Qwen in one of these supported IDEs: VS Code or VS Code forks`,
         false,
       );
       return;
@@ -527,7 +527,7 @@ export class IdeClient {
     if (!isWithinWorkspace) {
       return {
         isValid: false,
-        error: `Directory mismatch. Qwen Code is running in a different location than the open workspace in the IDE. Please run the CLI from one of the following directories: ${ideWorkspacePaths.join(
+        error: `Directory mismatch. Gus Qwen is running in a different location than the open workspace in the IDE. Please run the CLI from one of the following directories: ${ideWorkspacePaths.join(
           ', ',
         )}`,
       };
@@ -585,6 +585,17 @@ export class IdeClient {
       }
     }
 
+    // If no port is provided by the environment, fall back to the latest lock file.
+    try {
+      const ideDir = Storage.getGlobalIdeDir();
+      const configs = await this.getAllConnectionConfigs(ideDir);
+      if (configs.length > 0) {
+        return configs[0];
+      }
+    } catch (_) {
+      // Fall through to legacy discovery.
+    }
+
     // Legacy discovery for VSCode extension < v0.5.1.
     return this.getLegacyConnectionConfig(portFromEnv);
   }
@@ -600,13 +611,13 @@ export class IdeClient {
       try {
         const portFile = path.join(
           os.tmpdir(),
-          `qwen-code-ide-server-${this.ideProcessInfo.pid}.json`,
+          `gusqwen-ide-server-${this.ideProcessInfo.pid}.json`,
         );
         const portFileContents = await fs.promises.readFile(portFile, 'utf8');
         return JSON.parse(portFileContents);
       } catch (_) {
         // For older/newer extension versions, the file name matches the pattern
-        // /^qwen-code-ide-server-${pid}-\d+\.json$/. If multiple IDE
+        // /^gusqwen-ide-server-${pid}-\d+\.json$/. If multiple IDE
         // windows are open, multiple files matching the pattern are expected to
         // exist.
       }
@@ -616,7 +627,7 @@ export class IdeClient {
       try {
         const portFile = path.join(
           os.tmpdir(),
-          `qwen-code-ide-server-${portFromEnv}.json`,
+          `gusqwen-ide-server-${portFromEnv}.json`,
         );
         const portFileContents = await fs.promises.readFile(portFile, 'utf8');
         return JSON.parse(portFileContents);

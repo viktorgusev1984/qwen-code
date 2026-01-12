@@ -11,7 +11,7 @@ import Spinner from 'ink-spinner';
 import Link from 'ink-link';
 import qrcode from 'qrcode-terminal';
 import { Colors } from '../colors.js';
-import type { DeviceAuthorizationData } from '@qwen-code/qwen-code-core';
+import type { DeviceAuthorizationData } from '@psd-tech/gusqwen-core';
 import { useKeypress } from '../hooks/useKeypress.js';
 import { t } from '../../i18n/index.js';
 
@@ -53,7 +53,7 @@ function QrCodeDisplay({
       width="100%"
     >
       <Text bold color={Colors.AccentBlue}>
-        {t('Qwen OAuth Authentication')}
+        {t('Gus Qwen OAuth Authentication')}
       </Text>
 
       <Box marginTop={1}>
@@ -219,7 +219,7 @@ export function QwenOAuthProgress({
         width="100%"
       >
         <Text bold color={Colors.AccentRed}>
-          {t('Qwen OAuth Authentication Timeout')}
+          {t('Gus Qwen OAuth Authentication Timeout')}
         </Text>
 
         <Box marginTop={1}>
@@ -253,7 +253,7 @@ export function QwenOAuthProgress({
         width="100%"
       >
         <Text bold color={Colors.AccentRed}>
-          Qwen OAuth Authentication Error
+          Gus Qwen OAuth Authentication Error
         </Text>
 
         <Box marginTop={1}>
@@ -285,7 +285,7 @@ export function QwenOAuthProgress({
         <Box>
           <Text>
             <Spinner type="dots" />
-            {t('Waiting for Qwen OAuth authentication...')}
+            {t('Waiting for Gus Qwen OAuth authentication...')}
           </Text>
         </Box>
         <Box marginTop={1} justifyContent="space-between">

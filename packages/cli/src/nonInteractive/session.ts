@@ -1,13 +1,10 @@
 /**
  * @license
- * Copyright 2025 Qwen Team
+ * Copyright 2025 Gus Qwen Team
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import type {
-  Config,
-  ConfigInitializeOptions,
-} from '@qwen-code/qwen-code-core';
+import type { Config, ConfigInitializeOptions } from '@psd-tech/gusqwen-core';
 import { StreamJsonInputReader } from './io/StreamJsonInputReader.js';
 import { StreamJsonOutputAdapter } from './io/StreamJsonOutputAdapter.js';
 import { ControlContext } from './control/ControlContext.js';

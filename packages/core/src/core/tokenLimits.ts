@@ -113,6 +113,18 @@ const PATTERNS: Array<[RegExp, TokenCount]> = [
   // -------------------
   // Alibaba / Qwen
   // -------------------
+
+  // Qwen3-235B-A22B: flagship MoE model (235B total / 22B active),
+  // native 32K context, extendable to ~131K tokens via YaRN.
+  // We encode the extended limit as 128K (power-of-two approximation).
+  [/^qwen3-235b-a22b(-.*)?$/, LIMITS['128k']],
+
+  // Qwen3-Coder-480B-A35B-Instruct (large MoE coder model — 1M context)
+  [/^qwen3-coder-480b-a35b-instruct.*/, LIMITS['1m']],
+
+  // Qwen3-Next-80B-A3B-Instruct — large next-gen instruct model (128K context)
+  [/^qwen3-next-80b-a3b-instruct(-.*)?$/, LIMITS['128k']],
+
   // Commercial Qwen3-Coder-Plus: 1M token context
   [/^qwen3-coder-plus(-.*)?$/, LIMITS['1m']], // catches "qwen3-coder-plus" and date variants
 
@@ -192,6 +204,16 @@ const OUTPUT_PATTERNS: Array<[RegExp, TokenCount]> = [
   // -------------------
   // Alibaba / Qwen - DashScope Models
   // -------------------
+
+  // Qwen3-235B-A22B: reasoning MoE model, recommended max output ≈ 32K tokens.
+  [/^qwen3-235b-a22b(-.*)?$/, LIMITS['32k']],
+
+  // Qwen3-Coder-480B-A35B-Instruct — up to 64K output tokens
+  [/^qwen3-coder-480b-a35b-instruct(-.*)?$/, LIMITS['64k']],
+
+  // Qwen3-Next-80B-A3B-Instruct — up to 32K output tokens
+  [/^qwen3-next-80b-a3b-instruct(-.*)?$/, LIMITS['32k']],
+
   // Qwen3-Coder-Plus: 65,536 max output tokens
   [/^qwen3-coder-plus(-.*)?$/, LIMITS['64k']],
 

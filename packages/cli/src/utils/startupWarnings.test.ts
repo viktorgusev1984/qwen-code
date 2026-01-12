@@ -7,12 +7,12 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { getStartupWarnings } from './startupWarnings.js';
 import * as fs from 'node:fs/promises';
-import { getErrorMessage } from '@qwen-code/qwen-code-core';
+import { getErrorMessage } from '@psd-tech/gusqwen-core';
 
 vi.mock('node:fs/promises', { spy: true });
-vi.mock('@qwen-code/qwen-code-core', async (importOriginal) => {
+vi.mock('@psd-tech/gusqwen-core', async (importOriginal) => {
   const actual =
-    await importOriginal<typeof import('@qwen-code/qwen-code-core')>();
+    await importOriginal<typeof import('@psd-tech/gusqwen-core')>();
   return {
     ...actual,
     getErrorMessage: vi.fn(),

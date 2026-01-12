@@ -9,8 +9,8 @@ import path from 'node:path';
 import toml from '@iarna/toml';
 import { glob } from 'glob';
 import { z } from 'zod';
-import type { Config } from '@qwen-code/qwen-code-core';
-import { Storage } from '@qwen-code/qwen-code-core';
+import type { Config } from '@psd-tech/gusqwen-core';
+import { Storage } from '@psd-tech/gusqwen-core';
 import type { ICommandLoader } from './types.js';
 import type {
   CommandContext,

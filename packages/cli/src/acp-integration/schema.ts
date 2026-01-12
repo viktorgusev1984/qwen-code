@@ -146,7 +146,23 @@ export type SetModeResponse = z.infer<typeof setModeResponseSchema>;
 
 export type AvailableCommandInput = z.infer<typeof availableCommandInputSchema>;
 
-export type AvailableCommand = z.infer<typeof availableCommandSchema>;
+export interface AvailableCommand {
+  name: string;
+  description: string;
+  input?: {
+    hint: string;
+  } | null;
+  subCommands?: AvailableCommand[];
+}
+
+export const availableCommandSchema: z.ZodType<AvailableCommand> = z.lazy(() =>
+  z.object({
+    description: z.string(),
+    input: availableCommandInputSchema.nullable().optional(),
+    name: z.string(),
+    subCommands: z.array(availableCommandSchema).optional(),
+  }),
+);
 
 export type AvailableCommandsUpdate = z.infer<
   typeof availableCommandsUpdateSchema
@@ -496,12 +512,6 @@ export const availableCommandInputSchema = z.object({
   hint: z.string(),
 });
 
-export const availableCommandSchema = z.object({
-  description: z.string(),
-  input: availableCommandInputSchema.nullable().optional(),
-  name: z.string(),
-});
-
 export const availableCommandsUpdateSchema = z.object({
   availableCommands: z.array(availableCommandSchema),
   sessionUpdate: z.literal('available_commands_update'),
@@ -513,6 +523,21 @@ export const currentModeUpdateSchema = z.object({
 });
 
 export type CurrentModeUpdate = z.infer<typeof currentModeUpdateSchema>;
+
+export const chatCompressionUpdateSchema = z.object({
+  sessionUpdate: z.literal('chat_compression'),
+  originalTokenCount: z.number(),
+  newTokenCount: z.number(),
+  trigger: z.enum(['auto', 'manual']),
+});
+
+export const confirmActionUpdateSchema = z.object({
+  sessionUpdate: z.literal('confirm_action'),
+  prompt: z.string(),
+  originalInvocation: z.object({
+    raw: z.string(),
+  }),
+});
 
 export const sessionUpdateSchema = z.union([
   z.object({
@@ -555,6 +580,8 @@ export const sessionUpdateSchema = z.union([
     sessionUpdate: z.literal('plan'),
   }),
   currentModeUpdateSchema,
+  chatCompressionUpdateSchema,
+  confirmActionUpdateSchema,
   availableCommandsUpdateSchema,
 ]);
 

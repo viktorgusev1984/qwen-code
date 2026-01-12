@@ -486,19 +486,24 @@ export function execCommand(
       args,
       { encoding: 'utf8', ...options },
       (error, stdout, stderr) => {
+        const stdoutStr =
+          typeof stdout === 'string' ? stdout : stdout.toString('utf8');
+        const stderrStr =
+          typeof stderr === 'string' ? stderr : stderr.toString('utf8');
+
         if (error) {
           if (!options.preserveOutputOnError) {
             reject(error);
           } else {
             resolve({
-              stdout: stdout ?? '',
-              stderr: stderr ?? '',
+              stdout: stdoutStr,
+              stderr: stderrStr,
               code: typeof error.code === 'number' ? error.code : 1,
             });
           }
           return;
         }
-        resolve({ stdout: stdout ?? '', stderr: stderr ?? '', code: 0 });
+        resolve({ stdout: stdoutStr, stderr: stderrStr, code: 0 });
       },
     );
     child.on('error', reject);

@@ -6,7 +6,7 @@
 
 import type React from 'react';
 import { useState } from 'react';
-import { AuthType } from '@qwen-code/qwen-code-core';
+import { AuthType } from '@psd-tech/gusqwen-core';
 import { Box, Text } from 'ink';
 import { SettingScope } from '../../config/settings.js';
 import { Colors } from '../colors.js';
@@ -40,7 +40,7 @@ export function AuthDialog(): React.JSX.Element {
   const items = [
     {
       key: AuthType.QWEN_OAUTH,
-      label: t('Qwen OAuth'),
+      label: t('Gus Qwen OAuth'),
       value: AuthType.QWEN_OAUTH,
     },
     {
@@ -147,17 +147,17 @@ export function AuthDialog(): React.JSX.Element {
         <Box marginTop={1}>
           <Text color={Colors.Gray}>
             {t(
-              'Note: Your existing API key in settings.json will not be cleared when using Qwen OAuth. You can switch back to OpenAI authentication later if needed.',
+              'Note: Your existing API key in settings.json will not be cleared when using Gus Qwen OAuth. You can switch back to OpenAI authentication later if needed.',
             )}
           </Text>
         </Box>
       )}
       <Box marginTop={1}>
-        <Text>{t('Terms of Services and Privacy Notice for Qwen Code')}</Text>
+        <Text>{t('Terms of Services and Privacy Notice for Gus Qwen')}</Text>
       </Box>
       <Box marginTop={1}>
         <Text color={Colors.AccentBlue}>
-          {'https://github.com/QwenLM/Qwen3-Coder/blob/main/README.md'}
+          {'https://github.com/GusQwen/Qwen3-Coder/blob/main/README.md'}
         </Text>
       </Box>
     </Box>

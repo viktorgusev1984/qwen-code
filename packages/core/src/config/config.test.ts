@@ -180,7 +180,7 @@ describe('Server Config (config.ts)', () => {
   });
   const SANDBOX: SandboxConfig = {
     command: 'docker',
-    image: 'qwen-code-sandbox',
+    image: 'gusqwen-sandbox',
   };
   const TARGET_DIR = '/path/to/target';
   const DEBUG_MODE = false;
@@ -891,6 +891,16 @@ describe('Server Config (config.ts)', () => {
       expect(config.getTruncateToolOutputThreshold()).toBe(24000);
     });
 
+    it('should return the default threshold when the estimated value is non-positive', () => {
+      const config = new Config(baseParams);
+      vi.mocked(tokenLimit).mockReturnValue(1000);
+      vi.mocked(uiTelemetryService.getLastPromptTokenCount).mockReturnValue(
+        2000,
+      );
+      // 4 * (1000 - 2000) = -4000
+      expect(config.getTruncateToolOutputThreshold()).toBe(25_000);
+    });
+
     it('should return the default threshold when the calculated value is larger', () => {
       const config = new Config(baseParams);
       vi.mocked(tokenLimit).mockReturnValue(2_000_000);
@@ -915,6 +925,14 @@ describe('Server Config (config.ts)', () => {
       // 4 * (8000 - 2000) = 4 * 6000 = 24000
       // custom threshold is 50000
       expect(config.getTruncateToolOutputThreshold()).toBe(24000);
+
+      vi.mocked(tokenLimit).mockReturnValue(1000);
+      vi.mocked(uiTelemetryService.getLastPromptTokenCount).mockReturnValue(
+        2000,
+      );
+      // 4 * (1000 - 2000) = -4000
+      // custom threshold is 50000
+      expect(config.getTruncateToolOutputThreshold()).toBe(50000);
 
       vi.mocked(tokenLimit).mockReturnValue(32000);
       vi.mocked(uiTelemetryService.getLastPromptTokenCount).mockReturnValue(

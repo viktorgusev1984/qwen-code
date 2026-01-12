@@ -16,11 +16,11 @@ import {
   loadServerHierarchicalMemory,
   type FileDiscoveryService,
   type LoadServerHierarchicalMemoryResponse,
-} from '@qwen-code/qwen-code-core';
+} from '@psd-tech/gusqwen-core';
 
-vi.mock('@qwen-code/qwen-code-core', async (importOriginal) => {
+vi.mock('@psd-tech/gusqwen-core', async (importOriginal) => {
   const original =
-    await importOriginal<typeof import('@qwen-code/qwen-code-core')>();
+    await importOriginal<typeof import('@psd-tech/gusqwen-core')>();
   return {
     ...original,
     getErrorMessage: vi.fn((error: unknown) => {

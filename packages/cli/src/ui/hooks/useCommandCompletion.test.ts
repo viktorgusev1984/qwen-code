@@ -10,7 +10,7 @@ import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 import { renderHook, act, waitFor } from '@testing-library/react';
 import { useCommandCompletion } from './useCommandCompletion.js';
 import type { CommandContext } from '../commands/types.js';
-import type { Config } from '@qwen-code/qwen-code-core';
+import type { Config } from '@psd-tech/gusqwen-core';
 import { useTextBuffer } from '../components/shared/text-buffer.js';
 import { useEffect } from 'react';
 import type { Suggestion } from '../components/SuggestionsDisplay.js';
@@ -240,6 +240,32 @@ describe('useCommandCompletion', () => {
             expect.objectContaining({
               enabled: true,
               pattern: 'file1',
+            }),
+          );
+        });
+      });
+
+      it('should preserve trailing spaces for slash completion queries', async () => {
+        const text = '/chat resume ';
+        const cursorOffset = text.length;
+
+        renderHook(() =>
+          useCommandCompletion(
+            useTextBufferForTest(text, cursorOffset),
+            testDirs,
+            testRootDir,
+            [],
+            mockCommandContext,
+            false,
+            mockConfig,
+          ),
+        );
+
+        await waitFor(() => {
+          expect(useSlashCompletion).toHaveBeenLastCalledWith(
+            expect.objectContaining({
+              enabled: true,
+              query: '/chat resume ',
             }),
           );
         });

@@ -1,6 +1,6 @@
 # Provider Structure
 
-This folder contains the different provider implementations for the Qwen Code refactor system.
+This folder contains the different provider implementations for the Gus Qwen refactor system.
 
 ## File Structure
 

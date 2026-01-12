@@ -30,7 +30,7 @@ import {
   ExtensionUninstallEvent,
   ExtensionDisableEvent,
   ExtensionEnableEvent,
-} from '@qwen-code/qwen-code-core';
+} from '@psd-tech/gusqwen-core';
 import { execSync } from 'node:child_process';
 import { SettingScope } from './settings.js';
 import { isWorkspaceTrusted } from './trustedFolders.js';
@@ -87,9 +87,9 @@ const mockLogExtensionEnable = vi.hoisted(() => vi.fn());
 const mockLogExtensionInstallEvent = vi.hoisted(() => vi.fn());
 const mockLogExtensionUninstall = vi.hoisted(() => vi.fn());
 const mockLogExtensionDisable = vi.hoisted(() => vi.fn());
-vi.mock('@qwen-code/qwen-code-core', async (importOriginal) => {
+vi.mock('@psd-tech/gusqwen-core', async (importOriginal) => {
   const actual =
-    await importOriginal<typeof import('@qwen-code/qwen-code-core')>();
+    await importOriginal<typeof import('@psd-tech/gusqwen-core')>();
   return {
     ...actual,
     logExtensionEnable: mockLogExtensionEnable,
@@ -129,10 +129,10 @@ describe('extension tests', () => {
 
   beforeEach(() => {
     tempHomeDir = fs.mkdtempSync(
-      path.join(os.tmpdir(), 'qwen-code-test-home-'),
+      path.join(os.tmpdir(), 'gusqwen-test-home-'),
     );
     tempWorkspaceDir = fs.mkdtempSync(
-      path.join(tempHomeDir, 'qwen-code-test-workspace-'),
+      path.join(tempHomeDir, 'gusqwen-test-workspace-'),
     );
     userExtensionsDir = path.join(tempHomeDir, EXTENSIONS_DIRECTORY_NAME);
     fs.mkdirSync(userExtensionsDir, { recursive: true });

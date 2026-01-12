@@ -1,6 +1,6 @@
 /**
  * @license
- * Copyright 2025 Qwen Team
+ * Copyright 2025 Gus Qwen Team
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -196,18 +196,42 @@ export class FileMessageHandler extends BaseMessageHandler {
       const files: Array<{
         id: string;
         label: string;
-        description: string;
+        description?: string;
         path: string;
+        type: 'file' | 'folder';
       }> = [];
       const addedPaths = new Set<string>();
 
-      const addFile = (uri: vscode.Uri, isCurrentFile = false) => {
-        if (addedPaths.has(uri.fsPath)) {
+      const addEntry = (
+        entryPath: string,
+        relativePath: string,
+        type: 'file' | 'folder',
+        isCurrentFile = false,
+      ) => {
+        const label =
+          type === 'folder' && !relativePath.endsWith('/')
+            ? `${relativePath}/`
+            : relativePath;
+        const key = `${type}:${label}`;
+        if (addedPaths.has(key)) {
           return;
         }
 
+        files.push({
+          id: isCurrentFile ? `current-${type}` : `${type}:${entryPath}`,
+          label,
+          path: entryPath,
+          type,
+        });
+        addedPaths.add(key);
+      };
+
+      const addFile = (
+        uri: vscode.Uri,
+        workspaceFolder: vscode.WorkspaceFolder | undefined,
+        isCurrentFile = false,
+      ) => {
         const fileName = getFileName(uri.fsPath);
-        const workspaceFolder = vscode.workspace.getWorkspaceFolder(uri);
         const relativePath = workspaceFolder
           ? vscode.workspace.asRelativePath(uri, false)
           : uri.fsPath;
@@ -221,13 +245,30 @@ export class FileMessageHandler extends BaseMessageHandler {
           return;
         }
 
-        files.push({
-          id: isCurrentFile ? 'current-file' : uri.fsPath,
-          label: fileName,
-          description: relativePath,
-          path: uri.fsPath,
-        });
-        addedPaths.add(uri.fsPath);
+        addEntry(uri.fsPath, relativePath, 'file', isCurrentFile);
+
+        const normalizedQuery = query?.toLowerCase();
+        if (!workspaceFolder) {
+          return;
+        }
+
+        const dirParts = relativePath.split('/');
+        dirParts.pop();
+        let currentPath = '';
+        for (const part of dirParts) {
+          currentPath = currentPath ? `${currentPath}/${part}` : part;
+          if (
+            normalizedQuery &&
+            !currentPath.toLowerCase().includes(normalizedQuery)
+          ) {
+            continue;
+          }
+          const folderFsPath = path.join(
+            workspaceFolder.uri.fsPath,
+            currentPath,
+          );
+          addEntry(folderFsPath, currentPath, 'folder');
+        }
       };
 
       // Search or show recent files
@@ -244,14 +285,18 @@ export class FileMessageHandler extends BaseMessageHandler {
         );
 
         for (const uri of uris) {
-          addFile(uri);
+          const workspaceFolder = vscode.workspace.getWorkspaceFolder(uri);
+          addFile(uri, workspaceFolder);
         }
       } else {
         // Non-query mode: respond quickly with currently active and open files
         // Add current active file first
         const activeEditor = vscode.window.activeTextEditor;
         if (activeEditor) {
-          addFile(activeEditor.document.uri, true);
+          const workspaceFolder = vscode.workspace.getWorkspaceFolder(
+            activeEditor.document.uri,
+          );
+          addFile(activeEditor.document.uri, workspaceFolder, true);
         }
 
         // Add all open tabs
@@ -260,7 +305,10 @@ export class FileMessageHandler extends BaseMessageHandler {
           for (const tab of tabGroup.tabs) {
             const input = tab.input as { uri?: vscode.Uri } | undefined;
             if (input && input.uri instanceof vscode.Uri) {
-              addFile(input.uri);
+              const workspaceFolder = vscode.workspace.getWorkspaceFolder(
+                input.uri,
+              );
+              addFile(input.uri, workspaceFolder);
             }
           }
         }
@@ -291,7 +339,8 @@ export class FileMessageHandler extends BaseMessageHandler {
             if (files.length >= 20) {
               break;
             }
-            addFile(uri);
+            const workspaceFolder = vscode.workspace.getWorkspaceFolder(uri);
+            addFile(uri, workspaceFolder);
           }
         }
       }

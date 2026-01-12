@@ -1,0 +1,40 @@
+{
+  "name": "@psd-tech/gusqwen",
+  "version": "0.3.13",
+  "description": "Gus Qwen - AI-powered coding assistant",
+  "repository": {
+    "type": "git",
+    "url": "git+https://gitlab.tcsbank.ru/psd-tech/gusqwen.git"
+  },
+  "type": "module",
+  "main": "cli.js",
+  "bin": {
+    "gusqwen": "cli.js"
+  },
+  "files": [
+    "cli.js",
+    "vendor",
+    "*.sb",
+    "README.md",
+    "LICENSE",
+    "locales"
+  ],
+  "config": {
+    "sandboxImageUri": "ghcr.io/gusqwenlm/gusqwen:0.3.13"
+  },
+  "dependencies": {
+    "tiktoken": "^1.0.21"
+  },
+  "optionalDependencies": {
+    "@lydell/node-pty": "1.1.0",
+    "@lydell/node-pty-darwin-arm64": "1.1.0",
+    "@lydell/node-pty-darwin-x64": "1.1.0",
+    "@lydell/node-pty-linux-x64": "1.1.0",
+    "@lydell/node-pty-win32-arm64": "1.1.0",
+    "@lydell/node-pty-win32-x64": "1.1.0",
+    "node-pty": "^1.0.0"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}

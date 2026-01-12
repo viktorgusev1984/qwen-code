@@ -7,7 +7,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { AuthDialog } from './AuthDialog.js';
 import { LoadedSettings, SettingScope } from '../../config/settings.js';
-import { AuthType } from '@qwen-code/qwen-code-core';
+import { AuthType } from '@psd-tech/gusqwen-core';
 import { renderWithProviders } from '../../test-utils/render.js';
 import { UIStateContext } from '../contexts/UIStateContext.js';
 import { UIActionsContext } from '../contexts/UIActionsContext.js';
@@ -334,8 +334,8 @@ describe('AuthDialog', () => {
 
       const { lastFrame } = renderAuthDialog(settings);
 
-      // Default is Qwen OAuth (first option)
-      expect(lastFrame()).toContain('● 1. Qwen OAuth');
+      // Default is Gus Qwen OAuth (first option)
+      expect(lastFrame()).toContain('● 1. Gus Qwen OAuth');
     });
 
     it('should show an error and fall back to default if QWEN_DEFAULT_AUTH_TYPE is invalid', () => {
@@ -377,8 +377,8 @@ describe('AuthDialog', () => {
       const { lastFrame } = renderAuthDialog(settings);
 
       // Since the auth dialog doesn't show QWEN_DEFAULT_AUTH_TYPE errors anymore,
-      // it will just show the default Qwen OAuth option
-      expect(lastFrame()).toContain('● 1. Qwen OAuth');
+      // it will just show the default Gus Qwen OAuth option
+      expect(lastFrame()).toContain('● 1. Gus Qwen OAuth');
     });
   });
 

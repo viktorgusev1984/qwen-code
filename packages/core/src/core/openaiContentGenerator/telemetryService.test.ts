@@ -769,14 +769,27 @@ describe('DefaultTelemetryService', () => {
       expect(openaiLogger.logInteraction).toHaveBeenCalledWith(
         mockOpenAIRequest,
         expect.objectContaining({
+          id: 'test-id',
+          object: 'chat.completion',
+          created: 1234567890,
+          model: 'gpt-4',
           choices: [
-            expect.objectContaining({
-              message: expect.objectContaining({
+            {
+              index: 0,
+              message: {
+                role: 'assistant',
                 content: 'Hello world!',
-                reasoning_content: 'thinking more',
-              }),
-            }),
+                refusal: null,
+              },
+              finish_reason: 'stop',
+              logprobs: null,
+            },
           ],
+          usage: {
+            prompt_tokens: 10,
+            completion_tokens: 5,
+            total_tokens: 15,
+          },
         }),
       );
     });

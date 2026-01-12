@@ -24,14 +24,14 @@ import type {
   EditorType,
   GeminiClient,
   AnyToolInvocation,
-} from '@qwen-code/qwen-code-core';
+} from '@psd-tech/gusqwen-core';
 import {
   ApprovalMode,
   AuthType,
   GeminiEventType as ServerGeminiEventType,
   ToolErrorType,
   ToolConfirmationOutcome,
-} from '@qwen-code/qwen-code-core';
+} from '@psd-tech/gusqwen-core';
 import type { Part, PartListUnion } from '@google/genai';
 import type { UseHistoryManagerReturn } from './useHistoryManager.js';
 import type { HistoryItem, SlashCommandProcessorResult } from '../types.js';
@@ -78,7 +78,7 @@ const mockRestoreOriginalModel = vi.hoisted(() =>
   vi.fn().mockResolvedValue(undefined),
 );
 
-vi.mock('@qwen-code/qwen-code-core', async (importOriginal) => {
+vi.mock('@psd-tech/gusqwen-core', async (importOriginal) => {
   const actualCoreModule = (await importOriginal()) as any;
   return {
     ...actualCoreModule,
@@ -235,6 +235,7 @@ describe('useGeminiStream', () => {
         .mockReturnValue(contentGeneratorConfig),
       getMaxSessionTurns: vi.fn(() => 50),
       getUseSmartEdit: () => false,
+      shouldStreamResponses: vi.fn(() => true),
     } as unknown as Config;
     mockOnDebugMessage = vi.fn();
     mockHandleSlashCommand = vi.fn().mockResolvedValue(false);
@@ -1175,6 +1176,54 @@ describe('useGeminiStream', () => {
 
         expect(mockScheduleToolCalls).not.toHaveBeenCalled();
       });
+    });
+
+    it('should process @ references when a submit_prompt action includes an @ command', async () => {
+      const customCommandResult: SlashCommandProcessorResult = {
+        type: 'submit_prompt',
+        content: 'Use @file.txt for context.',
+      };
+      mockHandleSlashCommand.mockResolvedValue(customCommandResult);
+
+      const processedQueryParts = [
+        { text: 'Processed prompt' },
+        { text: 'File content' },
+      ];
+      handleAtCommandSpy.mockResolvedValue({
+        processedQuery: processedQueryParts,
+        shouldProceed: true,
+      });
+
+      const userMessageTimestamp = 1730000000000;
+      const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(userMessageTimestamp);
+
+      const { result, mockSendMessageStream: localMockSendMessageStream } =
+        renderTestHook();
+
+      await act(async () => {
+        await result.current.submitQuery('/with-file @file.txt');
+      });
+
+      try {
+        await waitFor(() => {
+          expect(handleAtCommandSpy).toHaveBeenCalledWith({
+            query: customCommandResult.content,
+            config: mockConfig,
+            addItem: mockAddItem,
+            onDebugMessage: mockOnDebugMessage,
+            messageId: userMessageTimestamp,
+            signal: expect.any(AbortSignal),
+          });
+
+          expect(localMockSendMessageStream).toHaveBeenCalledWith(
+            processedQueryParts,
+            expect.any(AbortSignal),
+            expect.any(String),
+          );
+        });
+      } finally {
+        nowSpy.mockRestore();
+      }
     });
 
     it('should correctly handle a submit_prompt action with empty content', async () => {

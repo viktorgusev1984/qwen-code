@@ -1,0 +1,33 @@
+<idea-plugin>
+  <id>org.gusqwen.intellij</id>
+  <name>Gus Qwen</name>
+  <vendor email="support@psd-tech.com" url="https://gitlab.tcsbank.ru/psd-tech/gusqwen">PSD Tech</vendor>
+
+  <description>
+    Gus Qwen integration for JetBrains IDEs (IntelliJ IDEA, WebStorm, PyCharm, etc.).
+  </description>
+
+  <depends>com.intellij.modules.platform</depends>
+
+  <extensions defaultExtensionNs="com.intellij">
+    <notificationGroup id="GusQwen" displayType="BALLOON" isLogByDefault="false" />
+    <applicationInitializedListener
+      implementation="org.gusqwen.intellij.GusQwenPluginRepositoryRegistrar"
+    />
+    <toolWindow
+      id="Gus Qwen"
+      anchor="right"
+      factoryClass="org.gusqwen.intellij.GusQwenToolWindowFactory"
+      canCloseContents="true"
+      icon="/icons/askAgent.svg"
+    />
+    <projectService
+      serviceImplementation="org.gusqwen.intellij.AcpClientService"
+    />
+    <applicationConfigurable
+      id="org.gusqwen.intellij.settings"
+      displayName="Gus Qwen"
+      instance="org.gusqwen.intellij.settings.GusQwenSettingsConfigurable"
+    />
+  </extensions>
+</idea-plugin>

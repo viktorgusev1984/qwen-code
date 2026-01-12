@@ -1,6 +1,6 @@
 /**
  * @license
- * Copyright 2025 Qwen Team
+ * Copyright 2025 Gus Qwen Team
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -10,13 +10,13 @@ import type {
   SessionMetrics,
   TaskResultDisplay,
   ToolCallResponseInfo,
-} from '@qwen-code/qwen-code-core';
+} from '@psd-tech/gusqwen-core';
 import {
   ToolErrorType,
   MCPServerStatus,
   getMCPServerStatus,
   OutputFormat,
-} from '@qwen-code/qwen-code-core';
+} from '@psd-tech/gusqwen-core';
 import type { Part } from '@google/genai';
 import type {
   CLIUserMessage,
@@ -60,9 +60,9 @@ vi.mock('../ui/utils/computeStats.js', () => ({
   }),
 }));
 
-vi.mock('@qwen-code/qwen-code-core', async (importOriginal) => {
+vi.mock('@psd-tech/gusqwen-core', async (importOriginal) => {
   const actual =
-    await importOriginal<typeof import('@qwen-code/qwen-code-core')>();
+    await importOriginal<typeof import('@psd-tech/gusqwen-core')>();
   return {
     ...actual,
     getMCPServerStatus: vi.fn(),

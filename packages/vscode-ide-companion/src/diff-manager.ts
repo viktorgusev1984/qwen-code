@@ -7,7 +7,7 @@
 import {
   IdeDiffAcceptedNotificationSchema,
   IdeDiffClosedNotificationSchema,
-} from '@qwen-code/qwen-code-core/src/ide/types.js';
+} from '@psd-tech/gusqwen-core/src/ide/types.js';
 import { type JSONRPCNotification } from '@modelcontextprotocol/sdk/types.js';
 import * as path from 'node:path';
 import * as vscode from 'vscode';
@@ -191,7 +191,7 @@ export class DiffManager {
       this.recentlyShown.set(key, now);
       return;
     }
-    // Left side: old content using qwen-diff scheme
+    // Left side: old content using gusqwen-diff scheme
     const leftDocUri = vscode.Uri.from({
       scheme: DIFF_SCHEME,
       path: normalizedPath,
@@ -199,7 +199,7 @@ export class DiffManager {
     });
     this.diffContentProvider.setContent(leftDocUri, oldContent);
 
-    // Right side: new content using qwen-diff scheme
+    // Right side: new content using gusqwen-diff scheme
     const rightDocUri = vscode.Uri.from({
       scheme: DIFF_SCHEME,
       path: normalizedPath,
@@ -218,7 +218,7 @@ export class DiffManager {
     const diffTitle = `${path.basename(normalizedPath)} (Before ↔ After)`;
     await vscode.commands.executeCommand(
       'setContext',
-      'qwen.diff.isVisible',
+      'gusqwen.diff.isVisible',
       true,
     );
 
@@ -358,7 +358,7 @@ export class DiffManager {
     }
     await vscode.commands.executeCommand(
       'setContext',
-      'qwen.diff.isVisible',
+      'gusqwen.diff.isVisible',
       isVisible,
     );
   }
@@ -371,7 +371,7 @@ export class DiffManager {
     const diffInfo = this.diffDocuments.get(rightDocUri.toString());
     await vscode.commands.executeCommand(
       'setContext',
-      'qwen.diff.isVisible',
+      'gusqwen.diff.isVisible',
       false,
     );
 
@@ -395,7 +395,7 @@ export class DiffManager {
     }
   }
 
-  /** Close all open qwen-diff editors */
+  /** Close all open gusqwen-diff editors */
   async closeAll(): Promise<void> {
     // Collect keys first to avoid iterator invalidation while closing
     const uris = Array.from(this.diffDocuments.keys()).map((k) =>

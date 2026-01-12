@@ -1,13 +1,13 @@
-# Qwen Code Configuration
+# Gus Qwen Configuration
 
 > [!tip]
 >
-> **Authentication / API keys:** Authentication (Qwen OAuth vs OpenAI-compatible API) and auth-related environment variables (like `OPENAI_API_KEY`) are documented in **[Authentication](../configuration/auth)**.
+> **Authentication / API keys:** Authentication (Gus Qwen OAuth vs OpenAI-compatible API) and auth-related environment variables (like `OPENAI_API_KEY`) are documented in **[Authentication](../configuration/auth)**.
 
 > [!note]
 >
 > **Note on New Configuration Format**: The format of the `settings.json` file has been updated to a new, more organized structure. The old format will be migrated automatically.
-> Qwen Code offers several ways to configure its behavior, including environment variables, command-line arguments, and settings files. This document outlines the different configuration methods and available settings.
+> Gus Qwen offers several ways to configure its behavior, including environment variables, command-line arguments, and settings files. This document outlines the different configuration methods and available settings.
 
 ## Configuration layers
 
@@ -25,14 +25,14 @@ Configuration is applied in the following order of precedence (lower numbers are
 
 ## Settings files
 
-Qwen Code uses JSON settings files for persistent configuration. There are four locations for these files:
+Gus Qwen uses JSON settings files for persistent configuration. There are four locations for these files:
 
 | File Type             | Location                                                                                                                                                                                                                                                                        | Scope                                                                                                                                                                                                                     |
 | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| System defaults file  | Linux: `/etc/qwen-code/system-defaults.json`<br>Windows: `C:\ProgramData\qwen-code\system-defaults.json`<br>macOS: `/Library/Application Support/QwenCode/system-defaults.json` <br>The path can be overridden using the `QWEN_CODE_SYSTEM_DEFAULTS_PATH` environment variable. | Provides a base layer of system-wide default settings. These settings have the lowest precedence and are intended to be overridden by user, project, or system override settings.                                         |
-| User settings file    | `~/.qwen/settings.json` (where `~` is your home directory).                                                                                                                                                                                                                     | Applies to all Qwen Code sessions for the current user.                                                                                                                                                                   |
-| Project settings file | `.qwen/settings.json` within your project's root directory.                                                                                                                                                                                                                     | Applies only when running Qwen Code from that specific project. Project settings override user settings.                                                                                                                  |
-| System settings file  | Linux： `/etc/qwen-code/settings.json` <br>Windows: `C:\ProgramData\qwen-code\settings.json` <br>macOS: `/Library/Application Support/QwenCode/settings.json`<br>The path can be overridden using the `QWEN_CODE_SYSTEM_SETTINGS_PATH` environment variable.                    | Applies to all Qwen Code sessions on the system, for all users. System settings override user and project settings. May be useful for system administrators at enterprises to have controls over users' Qwen Code setups. |
+| System defaults file  | Linux: `/etc/gusqwen/system-defaults.json`<br>Windows: `C:\ProgramData\gusqwen\system-defaults.json`<br>macOS: `/Library/Application Support/QwenCode/system-defaults.json` <br>The path can be overridden using the `QWEN_CODE_SYSTEM_DEFAULTS_PATH` environment variable. | Provides a base layer of system-wide default settings. These settings have the lowest precedence and are intended to be overridden by user, project, or system override settings.                                         |
+| User settings file    | `~/.qwen/settings.json` (where `~` is your home directory).                                                                                                                                                                                                                     | Applies to all Gus Qwen sessions for the current user.                                                                                                                                                                   |
+| Project settings file | `.qwen/settings.json` within your project's root directory.                                                                                                                                                                                                                     | Applies only when running Gus Qwen from that specific project. Project settings override user settings.                                                                                                                  |
+| System settings file  | Linux： `/etc/gusqwen/settings.json` <br>Windows: `C:\ProgramData\gusqwen\settings.json` <br>macOS: `/Library/Application Support/QwenCode/settings.json`<br>The path can be overridden using the `QWEN_CODE_SYSTEM_SETTINGS_PATH` environment variable.                    | Applies to all Gus Qwen sessions on the system, for all users. System settings override user and project settings. May be useful for system administrators at enterprises to have controls over users' Gus Qwen setups. |
 
 > [!note]
 >
@@ -40,7 +40,7 @@ Qwen Code uses JSON settings files for persistent configuration. There are four 
 
 ### The `.qwen` directory in your project
 
-In addition to a project settings file, a project's `.qwen` directory can contain other project-specific files related to Qwen Code's operation, such as:
+In addition to a project settings file, a project's `.qwen` directory can contain other project-specific files related to Gus Qwen's operation, such as:
 
 - [Custom sandbox profiles](../features/sandbox) (e.g. `.qwen/sandbox-macos-custom.sb`, `.qwen/sandbox.Dockerfile`).
 
@@ -56,7 +56,7 @@ Settings are organized into categories. All settings should be placed within the
 | `general.vimMode`               | boolean | Enable Vim keybindings.                                                                                    | `false`     |
 | `general.disableAutoUpdate`     | boolean | Disable automatic updates.                                                                                 | `false`     |
 | `general.disableUpdateNag`      | boolean | Disable update notification prompts.                                                                       | `false`     |
-| `general.gitCoAuthor`           | boolean | Automatically add a Co-authored-by trailer to git commit messages when commits are made through Qwen Code. | `true`      |
+| `general.gitCoAuthor`           | boolean | Automatically add a Co-authored-by trailer to git commit messages when commits are made through Gus Qwen. | `true`      |
 | `general.checkpointing.enabled` | boolean | Enable session checkpointing for recovery.                                                                 | `false`     |
 
 #### output
@@ -78,7 +78,7 @@ Settings are organized into categories. All settings should be placed within the
 | `ui.showMemoryUsage`                     | boolean          | Display memory usage information in the UI.                                                                                                                                                                                                                                                                                                                                                                         | `false`     |
 | `ui.showLineNumbers`                     | boolean          | Show line numbers in code blocks in the CLI output.                                                                                                                                                                                                                                                                                                                                                                 | `true`      |
 | `ui.showCitations`                       | boolean          | Show citations for generated text in the chat.                                                                                                                                                                                                                                                                                                                                                                      | `true`      |
-| `enableWelcomeBack`                      | boolean          | Show welcome back dialog when returning to a project with conversation history. When enabled, Qwen Code will automatically detect if you're returning to a project with a previously generated project summary (`.qwen/PROJECT_SUMMARY.md`) and show a dialog allowing you to continue your previous conversation or start fresh. This feature integrates with the `/summary` command and quit confirmation dialog. | `true`      |
+| `enableWelcomeBack`                      | boolean          | Show welcome back dialog when returning to a project with conversation history. When enabled, Gus Qwen will automatically detect if you're returning to a project with a previously generated project summary (`.qwen/PROJECT_SUMMARY.md`) and show a dialog allowing you to continue your previous conversation or start fresh. This feature integrates with the `/summary` command and quit confirmation dialog. | `true`      |
 | `ui.accessibility.disableLoadingPhrases` | boolean          | Disable loading phrases for accessibility.                                                                                                                                                                                                                                                                                                                                                                          | `false`     |
 | `ui.accessibility.screenReader`          | boolean          | Enables screen reader mode, which adjusts the TUI for better compatibility with screen readers.                                                                                                                                                                                                                                                                                                                     | `false`     |
 | `ui.customWittyPhrases`                  | array of strings | A list of custom phrases to display during loading states. When provided, the CLI will cycle through these phrases instead of the default ones.                                                                                                                                                                                                                                                                     | `[]`        |
@@ -209,11 +209,11 @@ If you are experiencing performance issues with file searching (e.g., with `@` c
 
 > [!note]
 >
-> **Note about advanced.tavilyApiKey:** This is a legacy configuration format. For Qwen OAuth users, DashScope provider is automatically available without any configuration. For other authentication types, configure Tavily or Google providers using the new `webSearch` configuration format.
+> **Note about advanced.tavilyApiKey:** This is a legacy configuration format. For Gus Qwen OAuth users, DashScope provider is automatically available without any configuration. For other authentication types, configure Tavily or Google providers using the new `webSearch` configuration format.
 
 #### mcpServers
 
-Configures connections to one or more Model-Context Protocol (MCP) servers for discovering and using custom tools. Qwen Code attempts to connect to each configured MCP server to discover available tools. If multiple MCP servers expose a tool with the same name, the tool names will be prefixed with the server alias you defined in the configuration (e.g., `serverAlias__actualToolName`) to avoid conflicts. Note that the system might strip certain schema properties from MCP tool definitions for compatibility. At least one of `command`, `url`, or `httpUrl` must be provided. If multiple are specified, the order of precedence is `httpUrl`, then `url`, then `command`.
+Configures connections to one or more Model-Context Protocol (MCP) servers for discovering and using custom tools. Gus Qwen attempts to connect to each configured MCP server to discover available tools. If multiple MCP servers expose a tool with the same name, the tool names will be prefixed with the server alias you defined in the configuration (e.g., `serverAlias__actualToolName`) to avoid conflicts. Note that the system might strip certain schema properties from MCP tool definitions for compatibility. At least one of `command`, `url`, or `httpUrl` must be provided. If multiple are specified, the order of precedence is `httpUrl`, then `url`, then `command`.
 
 | Property                                | Type             | Description                                                                                                                                                                                                                                                        | Optional |
 | --------------------------------------- | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------- |
@@ -232,7 +232,7 @@ Configures connections to one or more Model-Context Protocol (MCP) servers for d
 
 #### telemetry
 
-Configures logging and metrics collection for Qwen Code. For more information, see [telemetry](/developers/development/telemetry).
+Configures logging and metrics collection for Gus Qwen. For more information, see [telemetry](/developers/development/telemetry).
 
 | Setting                  | Type    | Description                                                                      | Default |
 | ------------------------ | ------- | -------------------------------------------------------------------------------- | ------- |
@@ -325,7 +325,7 @@ The CLI keeps a history of shell commands you run. To avoid conflicts between di
 
 Environment variables are a common way to configure applications, especially for sensitive information (like tokens) or for settings that might change between environments.
 
-Qwen Code can automatically load environment variables from `.env` files.
+Gus Qwen can automatically load environment variables from `.env` files.
 For authentication-related variables (like `OPENAI_*`) and the recommended `.qwen/.env` approach, see **[Authentication](../configuration/auth)**.
 
 > [!tip]
@@ -345,7 +345,7 @@ For authentication-related variables (like `OPENAI_*`) and the recommended `.qwe
 | `GEMINI_TELEMETRY_USE_COLLECTOR` | Set to `true` or `1` to enable or disable using an external OTLP collector. Any other value is treated as disabling it.                                | Overrides the `telemetry.useCollector` setting.                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | `GEMINI_SANDBOX`                 | Alternative to the `sandbox` setting in `settings.json`.                                                                                               | Accepts `true`, `false`, `docker`, `podman`, or a custom command string.                                                                                                                                                                                                                                                                                                                                                                                                           |
 | `SEATBELT_PROFILE`               | (macOS specific) Switches the Seatbelt (`sandbox-exec`) profile on macOS.                                                                              | `permissive-open`: (Default) Restricts writes to the project folder (and a few other folders, see `packages/cli/src/utils/sandbox-macos-permissive-open.sb`) but allows other operations. `strict`: Uses a strict profile that declines operations by default. `<profile_name>`: Uses a custom profile. To define a custom profile, create a file named `sandbox-macos-<profile_name>.sb` in your project's `.qwen/` directory (e.g., `my-project/.qwen/sandbox-macos-custom.sb`). |
-| `DEBUG` or `DEBUG_MODE`          | (often used by underlying libraries or the CLI itself) Set to `true` or `1` to enable verbose debug logging, which can be helpful for troubleshooting. | **Note:** These variables are automatically excluded from project `.env` files by default to prevent interference with the CLI behavior. Use `.qwen/.env` files if you need to set these for Qwen Code specifically.                                                                                                                                                                                                                                                               |
+| `DEBUG` or `DEBUG_MODE`          | (often used by underlying libraries or the CLI itself) Set to `true` or `1` to enable verbose debug logging, which can be helpful for troubleshooting. | **Note:** These variables are automatically excluded from project `.env` files by default to prevent interference with the CLI behavior. Use `.qwen/.env` files if you need to set these for Gus Qwen specifically.                                                                                                                                                                                                                                                               |
 | `NO_COLOR`                       | Set to any value to disable all color output in the CLI.                                                                                               |                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | `CLI_TITLE`                      | Set to a string to customize the title of the CLI.                                                                                                     |                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | `CODE_ASSIST_ENDPOINT`           | Specifies the endpoint for the code assist server.                                                                                                     | This is useful for development and testing.                                                                                                                                                                                                                                                                                                                                                                                                                                        |
@@ -360,7 +360,7 @@ Arguments passed directly when running the CLI can override other configurations
 | Argument                     | Alias | Description                                                                                                                                                                             | Possible Values                        | Notes                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 | ---------------------------- | ----- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `--model`                    | `-m`  | Specifies the Qwen model to use for this session.                                                                                                                                       | Model name                             | Example: `npm start -- --model qwen3-coder-plus`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
-| `--prompt`                   | `-p`  | Used to pass a prompt directly to the command. This invokes Qwen Code in a non-interactive mode.                                                                                        | Your prompt text                       | For scripting examples, use the `--output-format json` flag to get structured output.                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| `--prompt`                   | `-p`  | Used to pass a prompt directly to the command. This invokes Gus Qwen in a non-interactive mode.                                                                                        | Your prompt text                       | For scripting examples, use the `--output-format json` flag to get structured output.                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 | `--prompt-interactive`       | `-i`  | Starts an interactive session with the provided prompt as the initial input.                                                                                                            | Your prompt text                       | The prompt is processed within the interactive session, not before it. Cannot be used when piping input from stdin. Example: `qwen -i "explain this code"`                                                                                                                                                                                                                                                                                                                                                                                                      |
 | `--output-format`            | `-o`  | Specifies the format of the CLI output for non-interactive mode.                                                                                                                        | `text`, `json`, `stream-json`          | `text`: (Default) The standard human-readable output. `json`: A machine-readable JSON output emitted at the end of execution. `stream-json`: Streaming JSON messages emitted as they occur during execution. For structured output and scripting, use the `--output-format json` or `--output-format stream-json` flag. See [Headless Mode](../features/headless) for detailed information.                                                                                                                                                                     |
 | `--input-format`             |       | Specifies the format consumed from standard input.                                                                                                                                      | `text`, `stream-json`                  | `text`: (Default) Standard text input from stdin or command-line arguments. `stream-json`: JSON message protocol via stdin for bidirectional communication. Requirement: `--input-format stream-json` requires `--output-format stream-json` to be set. When using `stream-json`, stdin is reserved for protocol messages. See [Headless Mode](../features/headless) for detailed information.                                                                                                                                                                  |
@@ -444,11 +444,11 @@ This example demonstrates how you can provide general project context, specific 
   - Use `/memory show` to display the combined instructional context currently loaded, allowing you to verify the hierarchy and content being used by the AI.
   - See the [Commands documentation](../features/commands) for full details on the `/memory` command and its sub-commands (`show` and `refresh`).
 
-By understanding and utilizing these configuration layers and the hierarchical nature of context files, you can effectively manage the AI's memory and tailor Qwen Code's responses to your specific needs and projects.
+By understanding and utilizing these configuration layers and the hierarchical nature of context files, you can effectively manage the AI's memory and tailor Gus Qwen's responses to your specific needs and projects.
 
 ## Sandbox
 
-Qwen Code can execute potentially unsafe operations (like shell commands and file modifications) within a sandboxed environment to protect your system.
+Gus Qwen can execute potentially unsafe operations (like shell commands and file modifications) within a sandboxed environment to protect your system.
 
 [Sandbox](../features/sandbox) is disabled by default, but you can enable it in a few ways:
 
@@ -456,19 +456,19 @@ Qwen Code can execute potentially unsafe operations (like shell commands and fil
 - Setting `GEMINI_SANDBOX` environment variable.
 - Sandbox is enabled when using `--yolo` or `--approval-mode=yolo` by default.
 
-By default, it uses a pre-built `qwen-code-sandbox` Docker image.
+By default, it uses a pre-built `gusqwen-sandbox` Docker image.
 
 For project-specific sandboxing needs, you can create a custom Dockerfile at `.qwen/sandbox.Dockerfile` in your project's root directory. This Dockerfile can be based on the base sandbox image:
 
 ```
-FROM qwen-code-sandbox
+FROM gusqwen-sandbox
 # Add your custom dependencies or configurations here
 # For example:
 # RUN apt-get update && apt-get install -y some-package
 # COPY ./my-config /app/my-config
 ```
 
-When `.qwen/sandbox.Dockerfile` exists, you can use `BUILD_SANDBOX` environment variable when running Qwen Code to automatically build the custom sandbox image:
+When `.qwen/sandbox.Dockerfile` exists, you can use `BUILD_SANDBOX` environment variable when running Gus Qwen to automatically build the custom sandbox image:
 
 ```
 BUILD_SANDBOX=1 qwen -s
@@ -476,7 +476,7 @@ BUILD_SANDBOX=1 qwen -s
 
 ## Usage Statistics
 
-To help us improve Qwen Code, we collect anonymized usage statistics. This data helps us understand how the CLI is used, identify common issues, and prioritize new features.
+To help us improve Gus Qwen, we collect anonymized usage statistics. This data helps us understand how the CLI is used, identify common issues, and prioritize new features.
 
 **What we collect:**
 

@@ -16,7 +16,7 @@ import type { CommandContext } from '../ui/commands/types.js';
 import { createMockCommandContext } from '../test-utils/mockCommandContext.js';
 import * as child_process from 'node:child_process';
 import os from 'node:os';
-import { IdeClient } from '@qwen-code/qwen-code-core';
+import { IdeClient } from '@psd-tech/gusqwen-core';
 import * as versionUtils from './version.js';
 import type { ExecSyncOptions } from 'node:child_process';
 
@@ -32,9 +32,9 @@ vi.mock('./version.js', () => ({
   getCliVersion: vi.fn(),
 }));
 
-vi.mock('@qwen-code/qwen-code-core', async (importOriginal) => {
+vi.mock('@psd-tech/gusqwen-core', async (importOriginal) => {
   const actual =
-    await importOriginal<typeof import('@qwen-code/qwen-code-core')>();
+    await importOriginal<typeof import('@psd-tech/gusqwen-core')>();
   return {
     ...actual,
     IdeClient: {
@@ -157,13 +157,13 @@ describe('systemInfo', () => {
     });
 
     it('should return sandbox name without prefix when stripPrefix is true', () => {
-      process.env['SANDBOX'] = 'qwen-code-test-sandbox';
+      process.env['SANDBOX'] = 'gusqwen-test-sandbox';
       expect(getSandboxEnv(true)).toBe('test-sandbox');
     });
 
     it('should return sandbox name with prefix when stripPrefix is false', () => {
-      process.env['SANDBOX'] = 'qwen-code-test-sandbox';
-      expect(getSandboxEnv(false)).toBe('qwen-code-test-sandbox');
+      process.env['SANDBOX'] = 'gusqwen-test-sandbox';
+      expect(getSandboxEnv(false)).toBe('gusqwen-test-sandbox');
     });
 
     it('should handle qwen- prefix removal', () => {
@@ -269,7 +269,7 @@ describe('systemInfo', () => {
         },
       );
 
-      const { AuthType } = await import('@qwen-code/qwen-code-core');
+      const { AuthType } = await import('@psd-tech/gusqwen-core');
       // Update the mock context to use OpenAI auth
       mockContext.services.settings.merged.security!.auth!.selectedType =
         AuthType.USE_OPENAI;
@@ -282,7 +282,7 @@ describe('systemInfo', () => {
     });
 
     it('should use sandbox env without prefix for bug reports', async () => {
-      process.env['SANDBOX'] = 'qwen-code-test-sandbox';
+      process.env['SANDBOX'] = 'gusqwen-test-sandbox';
       vi.mocked(IdeClient.getInstance).mockResolvedValue({
         getDetectedIdeDisplayName: vi.fn().mockReturnValue(''),
       } as unknown as IdeClient);

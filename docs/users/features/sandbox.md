@@ -1,13 +1,13 @@
 # Sandbox
 
-This document explains how to run Qwen Code inside a sandbox to reduce risk when tools execute shell commands or modify files.
+This document explains how to run Gus Qwen inside a sandbox to reduce risk when tools execute shell commands or modify files.
 
 ## Prerequisites
 
-Before using sandboxing, you need to install and set up Qwen Code:
+Before using sandboxing, you need to install and set up Gus Qwen:
 
 ```bash
-npm install -g @qwen-code/qwen-code
+npm install -g @psd-tech/gusqwen
 ```
 
 To verify the installation
@@ -47,7 +47,7 @@ Lightweight, built-in sandboxing using `sandbox-exec`.
 
 Cross-platform sandboxing with complete process isolation.
 
-By default, Qwen Code uses a published sandbox image (configured in the CLI package) and will pull it as needed.
+By default, Gus Qwen uses a published sandbox image (configured in the CLI package) and will pull it as needed.
 
 **Best for**: Strong isolation on any OS, consistent tooling inside a known image.
 
@@ -102,7 +102,7 @@ qwen -p "run the test suite"
 - **CLI flag**: `--sandbox-image <image>`
 - **Environment variable**: `GEMINI_SANDBOX_IMAGE=<image>`
 
-If you don’t set either, Qwen Code uses the default image configured in the CLI package (for example `ghcr.io/qwenlm/qwen-code:<version>`).
+If you don’t set either, Gus Qwen uses the default image configured in the CLI package (for example `ghcr.io/gusqwenlm/gusqwen:<version>`).
 
 ### macOS Seatbelt profiles
 
@@ -199,7 +199,7 @@ This builds a project-specific image based on the default sandbox image.
 DEBUG=1 qwen -s -p "debug command"
 ```
 
-**Note:** If you have `DEBUG=true` in a project's `.env` file, it won't affect the CLI due to automatic exclusion. Use `.qwen/.env` files for Qwen Code-specific debug settings.
+**Note:** If you have `DEBUG=true` in a project's `.env` file, it won't affect the CLI due to automatic exclusion. Use `.qwen/.env` files for Gus Qwen-specific debug settings.
 
 ### Inspect sandbox
 

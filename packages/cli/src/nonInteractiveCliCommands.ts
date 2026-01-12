@@ -11,10 +11,11 @@ import {
   Logger,
   uiTelemetryService,
   type Config,
-} from '@qwen-code/qwen-code-core';
+} from '@psd-tech/gusqwen-core';
 import { CommandService } from './services/CommandService.js';
 import { BuiltinCommandLoader } from './services/BuiltinCommandLoader.js';
 import { FileCommandLoader } from './services/FileCommandLoader.js';
+import { McpPromptLoader } from './services/McpPromptLoader.js';
 import {
   CommandKind,
   type CommandContext,
@@ -29,7 +30,7 @@ import type { SessionStatsState } from './ui/contexts/SessionContext.js';
  *
  * - Always includes FILE commands
  * - Only includes BUILT_IN commands if their name is in the allowed set
- * - Excludes other command types (e.g., MCP_PROMPT) in non-interactive mode
+ * - Includes MCP_PROMPT commands for MCP-based slash commands
  *
  * @param commands All loaded commands
  * @param allowedBuiltinCommandNames Set of allowed built-in command names (empty = none allowed)
@@ -49,7 +50,10 @@ function filterCommandsForNonInteractive(
       return allowedBuiltinCommandNames.has(cmd.name);
     }
 
-    // Exclude other types (e.g., MCP_PROMPT) in non-interactive mode
+    if (cmd.kind === CommandKind.MCP_PROMPT) {
+      return true;
+    }
+
     return false;
   });
 }
@@ -62,7 +66,7 @@ function filterCommandsForNonInteractive(
  * @param config The configuration object
  * @param settings The loaded settings
  * @param allowedBuiltinCommandNames Optional array of built-in command names that are
- *   allowed. If not provided or empty, only file commands are available.
+ *   allowed. If not provided or empty, only file and MCP commands are available.
  * @returns A Promise that resolves to `PartListUnion` if a valid command is
  *   found and results in a prompt, or `undefined` otherwise.
  * @throws {FatalInputError} if the command result is not supported in
@@ -85,8 +89,12 @@ export const handleSlashCommand = async (
   // Only load BuiltinCommandLoader if there are allowed built-in commands
   const loaders =
     allowedBuiltinSet.size > 0
-      ? [new BuiltinCommandLoader(config), new FileCommandLoader(config)]
-      : [new FileCommandLoader(config)];
+      ? [
+          new BuiltinCommandLoader(config),
+          new FileCommandLoader(config),
+          new McpPromptLoader(config),
+        ]
+      : [new FileCommandLoader(config), new McpPromptLoader(config)];
 
   const commandService = await CommandService.create(
     loaders,
@@ -170,7 +178,7 @@ export const handleSlashCommand = async (
  * @param settings The loaded settings
  * @param abortSignal Signal to cancel the loading process
  * @param allowedBuiltinCommandNames Optional array of built-in command names that are
- *   allowed. If not provided or empty, only file commands are available.
+ *   allowed. If not provided or empty, only file and MCP commands are available.
  * @returns A Promise that resolves to an array of SlashCommand objects
  */
 export const getAvailableCommands = async (
@@ -185,8 +193,12 @@ export const getAvailableCommands = async (
     // Only load BuiltinCommandLoader if there are allowed built-in commands
     const loaders =
       allowedBuiltinSet.size > 0
-        ? [new BuiltinCommandLoader(config), new FileCommandLoader(config)]
-        : [new FileCommandLoader(config)];
+        ? [
+            new BuiltinCommandLoader(config),
+            new FileCommandLoader(config),
+            new McpPromptLoader(config),
+          ]
+        : [new FileCommandLoader(config), new McpPromptLoader(config)];
 
     const commandService = await CommandService.create(loaders, abortSignal);
     const commands = commandService.getCommands();

@@ -9,7 +9,7 @@ import open from 'open';
 import { bugCommand } from './bugCommand.js';
 import { createMockCommandContext } from '../../test-utils/mockCommandContext.js';
 import { GIT_COMMIT_INFO } from '../../generated/git-commit.js';
-import { AuthType } from '@qwen-code/qwen-code-core';
+import { AuthType } from '@psd-tech/gusqwen-core';
 import * as systemInfoUtils from '../../utils/systemInfo.js';
 
 // Mock dependencies
@@ -75,7 +75,7 @@ ${gitCommitLine}* **Model:** qwen3-coder-plus
 * **IDE Client:** VSCode
 `;
     const expectedUrl =
-      'https://github.com/QwenLM/qwen-code/issues/new?template=bug_report.yml&title=A%20test%20bug&info=' +
+      'https://github.com/GusQwen/gusqwen/issues/new?template=bug_report.yml&title=A%20test%20bug&info=' +
       encodeURIComponent(expectedInfo);
 
     expect(open).toHaveBeenCalledWith(expectedUrl);
@@ -172,7 +172,7 @@ ${gitCommitLine}* **Model:** qwen3-coder-plus
 * **IDE Client:** VSCode
 `;
     const expectedUrl =
-      'https://github.com/QwenLM/qwen-code/issues/new?template=bug_report.yml&title=OpenAI%20bug&info=' +
+      'https://github.com/GusQwen/gusqwen/issues/new?template=bug_report.yml&title=OpenAI%20bug&info=' +
       encodeURIComponent(expectedInfo);
 
     expect(open).toHaveBeenCalledWith(expectedUrl);

@@ -1,6 +1,6 @@
 /**
  * @license
- * Copyright 2025 Qwen Team
+ * Copyright 2025 Gus Qwen Team
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -138,6 +138,38 @@ export class QwenSessionUpdateHandler {
         break;
       }
 
+      case 'chat_compression': {
+        const info = {
+          originalTokenCount: update.originalTokenCount,
+          newTokenCount: update.newTokenCount,
+          trigger: update.trigger,
+        };
+        if (this.callbacks.onCompression) {
+          this.callbacks.onCompression(info);
+        } else if (this.callbacks.onStreamChunk) {
+          this.callbacks.onStreamChunk(
+            `IMPORTANT: A compressed context will be sent for future messages (compressed from: ${info.originalTokenCount} to ${info.newTokenCount} tokens).`,
+          );
+        }
+        break;
+      }
+
+      case 'confirm_action': {
+        const notice = {
+          prompt: update.prompt,
+          originalInvocation: update.originalInvocation,
+        };
+        if (this.callbacks.onConfirmAction) {
+          this.callbacks.onConfirmAction(notice);
+        } else if (this.callbacks.onStreamChunk) {
+          const fallback = notice.originalInvocation?.raw
+            ? `Confirm to continue: ${notice.originalInvocation.raw}`
+            : 'Confirmation required to continue.';
+          this.callbacks.onStreamChunk(`${notice.prompt} ${fallback}`);
+        }
+        break;
+      }
+
       case 'current_mode_update': {
         // Notify UI about mode change
         try {
@@ -149,6 +181,24 @@ export class QwenSessionUpdateHandler {
         } catch (err) {
           console.warn(
             '[SessionUpdateHandler] Failed to handle mode update',
+            err,
+          );
+        }
+        break;
+      }
+
+      case 'available_commands_update': {
+        // Notify UI about available commands
+        try {
+          if (
+            this.callbacks.onAvailableCommands &&
+            Array.isArray(update.availableCommands)
+          ) {
+            this.callbacks.onAvailableCommands(update.availableCommands);
+          }
+        } catch (err) {
+          console.warn(
+            '[SessionUpdateHandler] Failed to handle available commands update',
             err,
           );
         }

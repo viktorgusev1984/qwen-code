@@ -21,8 +21,8 @@ import {
 } from './gemini.js';
 import { type LoadedSettings } from './config/settings.js';
 import { appEvents, AppEvent } from './utils/events.js';
-import type { Config } from '@qwen-code/qwen-code-core';
-import { OutputFormat } from '@qwen-code/qwen-code-core';
+import type { Config } from '@psd-tech/gusqwen-core';
+import { OutputFormat } from '@psd-tech/gusqwen-core';
 
 // Custom error to identify mock process.exit calls
 class MockProcessExitError extends Error {
@@ -440,6 +440,7 @@ describe('gemini.tsx main function kitty protocol', () => {
       forScope: () => ({ settings: {}, originalSettings: {}, path: '' }),
     } as never);
     vi.mocked(parseArguments).mockResolvedValue({
+      streamingMode: undefined,
       model: undefined,
       sandbox: undefined,
       sandboxImage: undefined,

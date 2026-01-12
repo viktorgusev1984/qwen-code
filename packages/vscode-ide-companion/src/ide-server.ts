@@ -9,8 +9,8 @@ import {
   CloseDiffRequestSchema,
   IdeContextNotificationSchema,
   OpenDiffRequestSchema,
-} from '@qwen-code/qwen-code-core/src/ide/types.js';
-import { detectIdeFromEnv } from '@qwen-code/qwen-code-core/src/ide/detect-ide.js';
+} from '@psd-tech/gusqwen-core/src/ide/types.js';
+import { detectIdeFromEnv } from '@psd-tech/gusqwen-core/src/ide/detect-ide.js';
 import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
@@ -429,7 +429,7 @@ export class IDEServer {
 const createMcpServer = (diffManager: DiffManager) => {
   const server = new McpServer(
     {
-      name: 'qwen-code-companion-mcp-server',
+      name: 'gusqwen-companion-mcp-server',
       version: '1.0.0',
     },
     { capabilities: { logging: {} } },

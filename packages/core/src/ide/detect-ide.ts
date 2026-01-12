@@ -26,6 +26,11 @@ export function isCloudShell(): boolean {
 }
 
 export function detectIdeFromEnv(): IdeInfo {
+  const envIdeName = process.env['QWEN_CODE_IDE_NAME'];
+  const envIdeDisplayName = process.env['QWEN_CODE_IDE_DISPLAY_NAME'];
+  if (envIdeName && envIdeDisplayName) {
+    return { name: envIdeName, displayName: envIdeDisplayName };
+  }
   if (process.env['__COG_BASHRC_SOURCED']) {
     return IDE_DEFINITIONS.devin;
   }

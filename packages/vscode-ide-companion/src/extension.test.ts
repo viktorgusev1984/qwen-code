@@ -10,11 +10,19 @@ import { activate } from './extension.js';
 import {
   IDE_DEFINITIONS,
   detectIdeFromEnv,
-} from '@qwen-code/qwen-code-core/src/ide/detect-ide.js';
+} from '@psd-tech/gusqwen-core/src/ide/detect-ide.js';
 
-vi.mock('@qwen-code/qwen-code-core/src/ide/detect-ide.js', async () => {
+vi.mock('node:fs', () => ({
+  promises: {
+    mkdtemp: vi.fn(async () => '/tmp/gusqwen-vsix-'),
+    writeFile: vi.fn(async () => undefined),
+    rm: vi.fn(async () => undefined),
+  },
+}));
+
+vi.mock('@psd-tech/gusqwen-core/src/ide/detect-ide.js', async () => {
   const actual = await vi.importActual(
-    '@qwen-code/qwen-code-core/src/ide/detect-ide.js',
+    '@psd-tech/gusqwen-core/src/ide/detect-ide.js',
   );
   return {
     ...actual,
@@ -57,6 +65,7 @@ vi.mock('vscode', () => ({
   },
   Uri: {
     joinPath: vi.fn(),
+    file: vi.fn((fsPath: string) => ({ fsPath })),
   },
   ExtensionMode: {
     Development: 1,
@@ -113,7 +122,7 @@ describe('activate', () => {
     } as vscode.Extension<unknown>);
     await activate(context);
     expect(showInformationMessageMock).toHaveBeenCalledWith(
-      'Qwen Code Companion extension successfully installed.',
+      'Gus Qwen Companion extension successfully installed.',
     );
   });
 
@@ -131,21 +140,24 @@ describe('activate', () => {
     expect(vscode.workspace.onDidGrantWorkspaceTrust).toHaveBeenCalled();
   });
 
-  it('should launch the Qwen Code when the user clicks the button', async () => {
+  it('should launch the Gus Qwen when the user clicks the button', async () => {
     const showInformationMessageMock = vi
       .mocked(vscode.window.showInformationMessage)
-      .mockResolvedValue('Run Qwen Code' as never);
+      .mockResolvedValue('Run Gus Qwen' as never);
     vi.mocked(context.globalState.get).mockReturnValue(undefined);
     vi.mocked(vscode.extensions.getExtension).mockReturnValue({
       packageJSON: { version: '1.1.0' },
     } as vscode.Extension<unknown>);
     await activate(context);
     expect(showInformationMessageMock).toHaveBeenCalledWith(
-      'Qwen Code Companion extension successfully installed.',
+      'Gus Qwen Companion extension successfully installed.',
     );
   });
 
   describe('update notification', () => {
+    const latestVsixUrl =
+      'https://s3-msk.tinkoff.ru/psd-tech-gusqwen/vscode/gusqwen-vscode-ide-companion-1.2.0.vsix';
+
     beforeEach(() => {
       // Prevent the "installed" message from showing
       vi.mocked(context.globalState.get).mockReturnValue(true);
@@ -155,15 +167,8 @@ describe('activate', () => {
       vi.spyOn(global, 'fetch').mockResolvedValue({
         ok: true,
         json: async () => ({
-          results: [
-            {
-              extensions: [
-                {
-                  versions: [{ version: '1.2.0' }],
-                },
-              ],
-            },
-          ],
+          version: '1.2.0',
+          vsixUrl: latestVsixUrl,
         }),
       } as Response);
 
@@ -174,7 +179,7 @@ describe('activate', () => {
       await activate(context);
 
       expect(showInformationMessageMock).toHaveBeenCalledWith(
-        'A new version (1.2.0) of the Qwen Code Companion extension is available.',
+        'A new version (1.2.0) of the Gus Qwen Companion extension is available.',
         'Update to latest version',
       );
     });
@@ -183,15 +188,8 @@ describe('activate', () => {
       vi.spyOn(global, 'fetch').mockResolvedValue({
         ok: true,
         json: async () => ({
-          results: [
-            {
-              extensions: [
-                {
-                  versions: [{ version: '1.1.0' }],
-                },
-              ],
-            },
-          ],
+          version: '1.1.0',
+          vsixUrl: latestVsixUrl,
         }),
       } as Response);
 
@@ -225,15 +223,8 @@ describe('activate', () => {
       vi.spyOn(global, 'fetch').mockResolvedValue({
         ok: true,
         json: async () => ({
-          results: [
-            {
-              extensions: [
-                {
-                  versions: [{ version: '1.0.0' }],
-                },
-              ],
-            },
-          ],
+          version: '1.0.0',
+          vsixUrl: latestVsixUrl,
         }),
       } as Response);
 
@@ -247,20 +238,30 @@ describe('activate', () => {
     });
 
     it('should execute the install command when the user clicks "Update"', async () => {
-      vi.spyOn(global, 'fetch').mockResolvedValue({
-        ok: true,
-        json: async () => ({
-          results: [
-            {
-              extensions: [
-                {
-                  versions: [{ version: '1.2.0' }],
-                },
-              ],
-            },
-          ],
-        }),
-      } as Response);
+      vi.spyOn(global, 'fetch').mockImplementation(async (input) => {
+        const url =
+          typeof input === 'string'
+            ? input
+            : 'url' in input
+              ? input.url
+              : input.toString();
+        if (url.endsWith('/latest.json')) {
+          return {
+            ok: true,
+            json: async () => ({
+              version: '1.2.0',
+              vsixUrl: latestVsixUrl,
+            }),
+          } as Response;
+        }
+        if (url === latestVsixUrl) {
+          return {
+            ok: true,
+            arrayBuffer: async () => new ArrayBuffer(8),
+          } as Response;
+        }
+        throw new Error(`Unexpected fetch URL: ${url}`);
+      });
       vi.mocked(vscode.window.showInformationMessage).mockResolvedValue(
         'Update to latest version' as never,
       );
@@ -273,7 +274,7 @@ describe('activate', () => {
 
       expect(executeCommandMock).toHaveBeenCalledWith(
         'workbench.extensions.installExtension',
-        'qwenlm.qwen-code-vscode-ide-companion',
+        { fsPath: '/tmp/gusqwen-vsix-/gusqwen-vscode-ide-companion.vsix' },
       );
     });
 

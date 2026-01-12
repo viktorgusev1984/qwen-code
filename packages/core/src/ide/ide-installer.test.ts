@@ -41,6 +41,7 @@ describe('ide-installer', () => {
     it.each([
       { ide: IDE_DEFINITIONS.vscode },
       { ide: IDE_DEFINITIONS.firebasestudio },
+      { ide: IDE_DEFINITIONS.vscodefork },
     ])('returns a VsCodeInstaller for "$ide.name"', ({ ide }) => {
       const installer = getIdeInstaller(ide);
 
@@ -121,7 +122,7 @@ describe('ide-installer', () => {
           expectedCommand,
           [
             '--install-extension',
-            'qwenlm.qwen-code-vscode-ide-companion',
+            'gusqwenlm.gusqwen-vscode-ide-companion',
             '--force',
           ],
           { stdio: 'pipe', shell: isActuallyWindows },

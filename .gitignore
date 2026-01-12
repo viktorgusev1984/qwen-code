@@ -49,7 +49,7 @@ packages/core/src/generated/
 .integration-tests/
 packages/vscode-ide-companion/*.vsix
 
-# Qwen Code Configs
+# Gus Qwen Configs
 .qwen/
 logs/
 # GHA credentials
@@ -58,7 +58,39 @@ gha-creds-*.json
 # Log files
 patch_output.log
 
-# docs build
-docs-site/.next
-# content is a symlink to ../docs
-docs-site/content
+certs/
+
+# Eclipse
+.classpath
+.project
+.settings/
+
+# Intellij
+.idea/
+*.iml
+*.iws
+
+# Mac
+.DS_Store
+
+# Gradle
+.gradle
+build/
+!gradle/wrapper/gradle-wrapper.jar
+
+# Allure results
+**/allure-results
+
+/config
+/target
+/ai
+/docs
+/binary
+
+.intellijPlatform
+
+packages/intellij-ide-companion/src/main/resources/cli
+packages/intellij-ide-companion/src/main/resources/webview
+binary/
+.kotlin/
+.logs/

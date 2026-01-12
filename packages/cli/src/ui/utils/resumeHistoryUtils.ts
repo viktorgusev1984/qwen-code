@@ -1,6 +1,6 @@
 /**
  * @license
- * Copyright 2025 Qwen Code
+ * Copyright 2025 Gus Qwen
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -12,7 +12,7 @@ import type {
   AnyDeclarativeTool,
   ToolResultDisplay,
   SlashCommandRecordPayload,
-} from '@qwen-code/qwen-code-core';
+} from '@psd-tech/gusqwen-core';
 import type { HistoryItem, HistoryItemWithoutId } from '../types.js';
 import { ToolCallStatus } from '../types.js';
 

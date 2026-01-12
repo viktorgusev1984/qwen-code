@@ -19,6 +19,7 @@ import {
   BatchSpanProcessor,
   ConsoleSpanExporter,
 } from '@opentelemetry/sdk-trace-node';
+import type { SpanProcessor } from '@opentelemetry/sdk-trace-base';
 import {
   BatchLogRecordProcessor,
   ConsoleLogRecordExporter,
@@ -36,6 +37,7 @@ import {
   FileMetricExporter,
   FileSpanExporter,
 } from './file-exporters.js';
+import { LangfuseSpanProcessor } from '@langfuse/otel';
 
 // For troubleshooting, set the log level to DiagLogLevel.DEBUG
 diag.setLogger(new DiagConsoleLogger(), DiagLogLevel.INFO);
@@ -87,7 +89,11 @@ export function initializeTelemetry(config: Config): void {
   const otlpProtocol = config.getTelemetryOtlpProtocol();
   const parsedEndpoint = parseOtlpEndpoint(otlpEndpoint, otlpProtocol);
   const telemetryOutfile = config.getTelemetryOutfile();
-  const useOtlp = !!parsedEndpoint && !telemetryOutfile;
+  // Используем OTLP только если задан endpoint, нет outfile и НЕ заданы ключи Langfuse
+  const useOtlp =
+    !!parsedEndpoint &&
+    !telemetryOutfile &&
+    !(process.env['LANGFUSE_PUBLIC_KEY'] && process.env['LANGFUSE_SECRET_KEY']);
 
   let spanExporter:
     | OTLPTraceExporter
@@ -141,17 +147,57 @@ export function initializeTelemetry(config: Config): void {
       exportIntervalMillis: 10000,
     });
   } else {
-    spanExporter = new ConsoleSpanExporter();
-    logExporter = new ConsoleLogRecordExporter();
-    metricReader = new PeriodicExportingMetricReader({
-      exporter: new ConsoleMetricExporter(),
-      exportIntervalMillis: 10000,
-    });
+    // Даже если нет OTLP и outfile, не используем ConsoleSpanExporter, если заданы ключи Langfuse
+    if (
+      process.env['LANGFUSE_PUBLIC_KEY'] &&
+      process.env['LANGFUSE_SECRET_KEY']
+    ) {
+      // Используем FileSpanExporter с /dev/null чтобы подавить вывод в консоль
+      spanExporter = new FileSpanExporter('/dev/null');
+      logExporter = new FileLogExporter('/dev/null');
+      metricReader = new PeriodicExportingMetricReader({
+        exporter: new FileMetricExporter('/dev/null'),
+        exportIntervalMillis: 10000,
+      });
+    } else {
+      // Только если Langfuse не настроен, используем ConsoleSpanExporter как fallback
+      spanExporter = new ConsoleSpanExporter();
+      logExporter = new ConsoleLogRecordExporter();
+      metricReader = new PeriodicExportingMetricReader({
+        exporter: new ConsoleMetricExporter(),
+        exportIntervalMillis: 10000,
+      });
+    }
+  }
+
+  // Создаем массив процессоров спанов
+  const spanProcessors: SpanProcessor[] = [
+    new BatchSpanProcessor(spanExporter),
+  ];
+
+  // Добавляем LangfuseSpanProcessor, если заданы переменные окружения
+  if (
+    process.env['LANGFUSE_PUBLIC_KEY'] &&
+    process.env['LANGFUSE_SECRET_KEY']
+  ) {
+    console.log('Langfuse is configured and will receive traces');
+    spanProcessors.push(
+      new LangfuseSpanProcessor({
+        publicKey: process.env['LANGFUSE_PUBLIC_KEY'],
+        secretKey: process.env['LANGFUSE_SECRET_KEY'],
+        baseUrl: process.env['LANGFUSE_BASE_URL'],
+        release: process.env['npm_package_name'],
+      }),
+    );
+  } else {
+    console.log(
+      'Langfuse is NOT configured - no traces will be sent to Langfuse',
+    );
   }
 
   sdk = new NodeSDK({
     resource,
-    spanProcessors: [new BatchSpanProcessor(spanExporter)],
+    spanProcessors,
     logRecordProcessors: [new BatchLogRecordProcessor(logExporter)],
     metricReader,
     instrumentations: [new HttpInstrumentation()],

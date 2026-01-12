@@ -15,6 +15,7 @@ import type { OpenAICompatibleProvider } from './provider/index.js';
 import { OpenAIContentConverter } from './converter.js';
 import type { TelemetryService, RequestContext } from './telemetryService.js';
 import type { ErrorHandler } from './errorHandler.js';
+import { type Span, trace } from '@opentelemetry/api';
 
 export interface PipelineConfig {
   cliConfig: Config;
@@ -34,7 +35,6 @@ export class ContentGenerationPipeline {
     this.client = this.config.provider.buildClient();
     this.converter = new OpenAIContentConverter(
       this.contentGeneratorConfig.model,
-      this.contentGeneratorConfig.schemaCompliance,
     );
   }
 
@@ -47,25 +47,62 @@ export class ContentGenerationPipeline {
       userPromptId,
       false,
       async (openaiRequest, context) => {
-        const openaiResponse = (await this.client.chat.completions.create(
-          openaiRequest,
-          {
-            signal: request.config?.abortSignal,
+        const tracer = trace.getTracer('gusqwen');
+        const span = tracer.startSpan('openai.chat.completions.create', {
+          attributes: {
+            'llm.request.type': 'chat',
+            'llm.api.provider': 'openai',
+            'llm.model': openaiRequest.model,
+            ...(openaiRequest.temperature != null
+              ? { 'llm.request.temperature': openaiRequest.temperature }
+              : {}),
+            ...(openaiRequest.top_p != null
+              ? { 'llm.request.top_p': openaiRequest.top_p }
+              : {}),
+            ...(openaiRequest.max_tokens != null
+              ? { 'llm.request.max_tokens': openaiRequest.max_tokens }
+              : {}),
+            input: JSON.stringify(openaiRequest.messages),
           },
-        )) as OpenAI.Chat.ChatCompletion;
+        });
 
-        const geminiResponse =
-          this.converter.convertOpenAIResponseToGemini(openaiResponse);
+        try {
+          const openaiResponse = (await this.client.chat.completions.create(
+            openaiRequest,
+            {
+              signal: request.config?.abortSignal,
+            },
+          )) as OpenAI.Chat.ChatCompletion;
 
-        // Log success
-        await this.config.telemetryService.logSuccess(
-          context,
-          geminiResponse,
-          openaiRequest,
-          openaiResponse,
-        );
+          const geminiResponse =
+            this.converter.convertOpenAIResponseToGemini(openaiResponse);
 
-        return geminiResponse;
+          // Добавим атрибуты ответа
+          span.setAttributes({
+            'llm.response.model': openaiResponse.model,
+            output: openaiResponse.choices[0]?.message?.content || '',
+            'llm.usage.prompt_tokens': openaiResponse.usage?.prompt_tokens,
+            'llm.usage.completion_tokens':
+              openaiResponse.usage?.completion_tokens,
+            'llm.usage.total_tokens': openaiResponse.usage?.total_tokens,
+          });
+
+          // Логируем успех
+          await this.config.telemetryService.logSuccess(
+            context,
+            geminiResponse,
+            openaiRequest,
+            openaiResponse,
+          );
+
+          span.setStatus({ code: 0 });
+          return geminiResponse;
+        } catch (error) {
+          span.setStatus({ code: 2, message: (error as Error).message });
+          throw error;
+        } finally {
+          span.end();
+        }
       },
     );
   }
@@ -79,23 +116,80 @@ export class ContentGenerationPipeline {
       userPromptId,
       true,
       async (openaiRequest, context) => {
-        // Stage 1: Create OpenAI stream
-        const stream = (await this.client.chat.completions.create(
-          openaiRequest,
-          {
-            signal: request.config?.abortSignal,
+        const tracer = trace.getTracer('gusqwen');
+        const span = tracer.startSpan('openai.chat.completions.create', {
+          attributes: {
+            'llm.request.type': 'chat',
+            'llm.api.provider': 'openai',
+            'llm.model': openaiRequest.model,
+            ...(openaiRequest.temperature != null
+              ? { 'llm.request.temperature': openaiRequest.temperature }
+              : {}),
+            ...(openaiRequest.top_p != null
+              ? { 'llm.request.top_p': openaiRequest.top_p }
+              : {}),
+            ...(openaiRequest.max_tokens != null
+              ? { 'llm.request.max_tokens': openaiRequest.max_tokens }
+              : {}),
+            input: JSON.stringify(openaiRequest.messages),
           },
-        )) as AsyncIterable<OpenAI.Chat.ChatCompletionChunk>;
+        });
 
-        // Stage 2: Process stream with conversion and logging
-        return this.processStreamWithLogging(
-          stream,
-          context,
-          openaiRequest,
-          request,
-        );
+        try {
+          // Stage 1: Create OpenAI stream
+          const stream = (await this.client.chat.completions.create(
+            openaiRequest,
+            {
+              signal: request.config?.abortSignal,
+            },
+          )) as AsyncIterable<OpenAI.Chat.ChatCompletionChunk>;
+
+          // Stage 2: Process stream with conversion and logging
+          const generator = this.processStreamWithLogging(
+            stream,
+            context,
+            openaiRequest,
+            request,
+          );
+
+          // Обернём генератор, чтобы установить атрибуты после завершения
+          const wrappedGenerator = this.wrapStreamForTelemetry(generator, span);
+
+          return wrappedGenerator;
+        } catch (error) {
+          span.setStatus({ code: 2, message: (error as Error).message });
+          span.end();
+          throw error;
+        }
       },
     );
+  }
+
+  private async *wrapStreamForTelemetry(
+    generator: AsyncGenerator<GenerateContentResponse>,
+    span: Span,
+  ): AsyncGenerator<GenerateContentResponse> {
+    let completionTokens = 0;
+    let totalTokens = 0;
+
+    try {
+      for await (const chunk of generator) {
+        if (chunk.usageMetadata) {
+          completionTokens = chunk.usageMetadata.candidatesTokenCount ?? 0;
+          totalTokens = chunk.usageMetadata.totalTokenCount ?? 0;
+        }
+        yield chunk;
+      }
+    } catch (error) {
+      span.setStatus({ code: 2, message: (error as Error).message });
+      throw error;
+    } finally {
+      span.setAttributes({
+        'llm.usage.completion_tokens': completionTokens,
+        'llm.usage.total_tokens': totalTokens,
+      });
+      span.end();
+    }
   }
 
   /**
@@ -256,7 +350,7 @@ export class ContentGenerationPipeline {
 
     // Apply provider-specific enhancements
     const baseRequest: OpenAI.Chat.ChatCompletionCreateParams = {
-      model: this.contentGeneratorConfig.model,
+      model: request.model,
       messages,
       ...this.buildSamplingParameters(request),
     };
@@ -283,22 +377,16 @@ export class ContentGenerationPipeline {
   private buildSamplingParameters(
     request: GenerateContentParameters,
   ): Record<string, unknown> {
-    const defaultSamplingParams =
-      this.config.provider.getDefaultGenerationConfig();
     const configSamplingParams = this.contentGeneratorConfig.samplingParams;
 
     // Helper function to get parameter value with priority: config > request > default
     const getParameterValue = <T>(
       configKey: keyof NonNullable<typeof configSamplingParams>,
-      requestKey?: keyof NonNullable<typeof request.config>,
+      requestKey: keyof NonNullable<typeof request.config>,
+      defaultValue?: T,
     ): T | undefined => {
       const configValue = configSamplingParams?.[configKey] as T | undefined;
-      const requestValue = requestKey
-        ? (request.config?.[requestKey] as T | undefined)
-        : undefined;
-      const defaultValue = requestKey
-        ? (defaultSamplingParams[requestKey] as T)
-        : undefined;
+      const requestValue = request.config?.[requestKey] as T | undefined;
 
       if (configValue !== undefined) return configValue;
       if (requestValue !== undefined) return requestValue;
@@ -310,8 +398,12 @@ export class ContentGenerationPipeline {
       key: string,
       configKey: keyof NonNullable<typeof configSamplingParams>,
       requestKey?: keyof NonNullable<typeof request.config>,
-    ): Record<string, T | undefined> => {
-      const value = getParameterValue<T>(configKey, requestKey);
+      defaultValue?: T,
+    ): Record<string, T> | Record<string, never> => {
+      const value = requestKey
+        ? getParameterValue(configKey, requestKey, defaultValue)
+        : ((configSamplingParams?.[configKey] as T | undefined) ??
+          defaultValue);
 
       return value !== undefined ? { [key]: value } : {};
     };
@@ -325,18 +417,10 @@ export class ContentGenerationPipeline {
       ...addParameterIfDefined('max_tokens', 'max_tokens', 'maxOutputTokens'),
 
       // Config-only parameters (no request fallback)
-      ...addParameterIfDefined('top_k', 'top_k', 'topK'),
+      ...addParameterIfDefined('top_k', 'top_k'),
       ...addParameterIfDefined('repetition_penalty', 'repetition_penalty'),
-      ...addParameterIfDefined(
-        'presence_penalty',
-        'presence_penalty',
-        'presencePenalty',
-      ),
-      ...addParameterIfDefined(
-        'frequency_penalty',
-        'frequency_penalty',
-        'frequencyPenalty',
-      ),
+      ...addParameterIfDefined('presence_penalty', 'presence_penalty'),
+      ...addParameterIfDefined('frequency_penalty', 'frequency_penalty'),
     };
 
     return params;

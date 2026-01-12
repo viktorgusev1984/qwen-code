@@ -79,6 +79,7 @@ export class LoopDetectionService {
   // Tool call tracking
   private lastToolCallKey: string | null = null;
   private toolCallRepetitionCount: number = 0;
+  private lastDetectedLoopType: LoopType | null = null;
 
   // Content streaming tracking
   private streamContentHistory = '';
@@ -95,6 +96,9 @@ export class LoopDetectionService {
   // Session-level disable flag
   private disabledForSession = false;
 
+  // Counter for loop detections
+  private loopDetectionCount = 0;
+
   constructor(config: Config) {
     this.config = config;
   }
@@ -108,6 +112,17 @@ export class LoopDetectionService {
       this.config,
       new LoopDetectionDisabledEvent(this.promptId),
     );
+  }
+
+  getLastDetectedLoopType(): LoopType | null {
+    return this.lastDetectedLoopType;
+  }
+
+  /**
+   * Returns the number of times a loop has been detected.
+   */
+  getLoopDetectionCount(): number {
+    return this.loopDetectionCount;
   }
 
   private getToolCallKey(toolCall: { name: string; args: object }): string {
@@ -177,7 +192,15 @@ export class LoopDetectionService {
       this.lastToolCallKey = key;
       this.toolCallRepetitionCount = 1;
     }
+
     if (this.toolCallRepetitionCount >= TOOL_CALL_LOOP_THRESHOLD) {
+      this.loopDetectionCount++;
+
+      // For first two detections, don't return true (don't trigger loop handling)
+      if (this.loopDetectionCount <= 2) {
+        return false;
+      }
+
       logLoopDetected(
         this.config,
         new LoopDetectedEvent(
@@ -291,6 +314,14 @@ export class LoopDetectionService {
       const chunkHash = createHash('sha256').update(currentChunk).digest('hex');
 
       if (this.isLoopDetectedForChunk(currentChunk, chunkHash)) {
+        this.lastDetectedLoopType = LoopType.CHANTING_IDENTICAL_SENTENCES;
+        this.loopDetectionCount++;
+
+        // For first two detections, don't return true (don't trigger loop handling)
+        if (this.loopDetectionCount <= 2) {
+          return false;
+        }
+
         logLoopDetected(
           this.config,
           new LoopDetectedEvent(
@@ -440,6 +471,14 @@ export class LoopDetectionService {
         if (typeof result['reasoning'] === 'string' && result['reasoning']) {
           console.warn(result['reasoning']);
         }
+        this.lastDetectedLoopType = LoopType.LLM_DETECTED_LOOP;
+        this.loopDetectionCount++;
+
+        // For first two detections, don't return true (don't trigger loop handling)
+        if (this.loopDetectionCount <= 2) {
+          return false;
+        }
+
         logLoopDetected(
           this.config,
           new LoopDetectedEvent(LoopType.LLM_DETECTED_LOOP, this.promptId),
@@ -465,6 +504,8 @@ export class LoopDetectionService {
     this.resetContentTracking();
     this.resetLlmCheckTracking();
     this.loopDetected = false;
+    this.lastDetectedLoopType = null;
+    this.loopDetectionCount = 0;
   }
 
   private resetToolCallCount(): void {

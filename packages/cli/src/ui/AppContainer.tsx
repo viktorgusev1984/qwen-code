@@ -38,7 +38,7 @@ import {
   getErrorMessage,
   getAllGeminiMdFilenames,
   ShellExecutionService,
-} from '@qwen-code/qwen-code-core';
+} from '@psd-tech/gusqwen-core';
 import { buildResumedHistoryItems } from './utils/resumeHistoryUtils.js';
 import { validateAuthMethod } from '../config/auth.js';
 import { loadHierarchicalGeminiMemory } from '../config/config.js';
@@ -1214,7 +1214,7 @@ export const AppContainer = (props: AppContainerProps) => {
       authError,
       isAuthDialogOpen,
       pendingAuthType,
-      // Qwen OAuth state
+      // Gus Qwen OAuth state
       qwenAuthState,
       editorError,
       isEditorDialogOpen,
@@ -1303,7 +1303,7 @@ export const AppContainer = (props: AppContainerProps) => {
       authError,
       isAuthDialogOpen,
       pendingAuthType,
-      // Qwen OAuth state
+      // Gus Qwen OAuth state
       qwenAuthState,
       editorError,
       isEditorDialogOpen,

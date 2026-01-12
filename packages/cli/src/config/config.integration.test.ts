@@ -11,8 +11,8 @@ import { tmpdir } from 'node:os';
 import type {
   ConfigParameters,
   ContentGeneratorConfig,
-} from '@qwen-code/qwen-code-core';
-import { Config } from '@qwen-code/qwen-code-core';
+} from '@psd-tech/gusqwen-core';
+import { Config } from '@psd-tech/gusqwen-core';
 import { http, HttpResponse } from 'msw';
 import { setupServer } from 'msw/node';
 import type { Settings } from './settings.js';
@@ -41,8 +41,8 @@ const TEST_CONTENT_GENERATOR_CONFIG: ContentGeneratorConfig = {
 };
 
 // Mock file discovery service and tool registry
-vi.mock('@qwen-code/qwen-code-core', async () => {
-  const actual = await vi.importActual('@qwen-code/qwen-code-core');
+vi.mock('@psd-tech/gusqwen-core', async () => {
+  const actual = await vi.importActual('@psd-tech/gusqwen-core');
   return {
     ...actual,
     FileDiscoveryService: vi.fn().mockImplementation(() => ({
@@ -56,7 +56,7 @@ describe('Configuration Integration Tests', () => {
   let tempDir: string;
 
   beforeEach(() => {
-    tempDir = fs.mkdtempSync(path.join(tmpdir(), 'qwen-code-test-'));
+    tempDir = fs.mkdtempSync(path.join(tmpdir(), 'gusqwen-test-'));
     server.resetHandlers(http.post(CLEARCUT_URL, () => HttpResponse.text()));
 
     vi.stubEnv('GEMINI_API_KEY', 'test-api-key');

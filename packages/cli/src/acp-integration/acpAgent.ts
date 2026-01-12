@@ -19,7 +19,7 @@ import {
   type Config,
   type ConversationRecord,
   type DeviceAuthorizationData,
-} from '@qwen-code/qwen-code-core';
+} from '@psd-tech/gusqwen-core';
 import type { ApprovalModeValue } from './schema.js';
 import * as acp from './acp.js';
 import { AcpFileSystemService } from './service/filesystem.js';
@@ -83,7 +83,7 @@ class GeminiAgent {
       },
       {
         id: AuthType.QWEN_OAUTH,
-        name: 'Qwen OAuth',
+        name: 'Gus Qwen OAuth',
         description:
           'OAuth authentication for Qwen models with 2000 daily requests',
       },
@@ -104,8 +104,8 @@ class GeminiAgent {
     return {
       protocolVersion: acp.PROTOCOL_VERSION,
       agentInfo: {
-        name: 'qwen-code',
-        title: 'Qwen Code',
+        name: 'gusqwen',
+        title: 'Gus Qwen',
         version,
       },
       authMethods,
@@ -343,8 +343,20 @@ class GeminiAgent {
     );
     this.sessions.set(sessionId, session);
 
+    console.log(
+      '[GeminiAgent] Scheduling sendAvailableCommandsUpdate for session',
+      sessionId,
+    );
     setTimeout(async () => {
+      console.log(
+        '[GeminiAgent] Executing sendAvailableCommandsUpdate for session',
+        sessionId,
+      );
       await session.sendAvailableCommandsUpdate();
+      console.log(
+        '[GeminiAgent] Completed sendAvailableCommandsUpdate for session',
+        sessionId,
+      );
     }, 0);
 
     if (conversation && conversation.messages) {

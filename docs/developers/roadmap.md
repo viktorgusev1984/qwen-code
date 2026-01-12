@@ -1,4 +1,4 @@
-# Qwen Code RoadMap
+# Gus Qwen RoadMap
 
 > **Objective**: Catch up with Claude Code's product functionality, continuously refine details, and enhance user experience.
 
@@ -19,7 +19,7 @@
 | Feature                 | Version   | Description                                             | Category                        |
 | ----------------------- | --------- | ------------------------------------------------------- | ------------------------------- |
 | Skill                   | `V0.6.0`  | Extensible custom AI skills                             | Coding Workflow                 |
-| Github Actions          | `V0.5.0`  | qwen-code-action and automation                         | Integrating Community Ecosystem |
+| Github Actions          | `V0.5.0`  | gusqwen-action and automation                         | Integrating Community Ecosystem |
 | VSCode Plugin           | `V0.5.0`  | VSCode extension plugin                                 | Integrating Community Ecosystem |
 | QwenCode SDK            | `V0.4.0`  | Open SDK for third-party integration                    | Building Open Capabilities      |
 | Session                 | `V0.4.0`  | Enhanced session management                             | User Experience                 |
@@ -48,7 +48,7 @@
 | Tool: TextSearch        | `V0.0.8+` | Text search tool (grep, supports .qwenignore)           | Coding Workflow                 |
 | Tool: WebFetch          | `V0.0.7+` | Web content fetching tool                               | Coding Workflow                 |
 | Tool: WebSearch         | `V0.0.7+` | Web search tool (using Tavily API)                      | Coding Workflow                 |
-| OAuth                   | `V0.0.5+` | OAuth login authentication (Qwen OAuth)                 | User Experience                 |
+| OAuth                   | `V0.0.5+` | OAuth login authentication (Gus Qwen OAuth)                 | User Experience                 |
 
 #### Features to Develop
 

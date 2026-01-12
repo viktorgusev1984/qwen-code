@@ -7,7 +7,7 @@
 import type React from 'react';
 import { Box, Text } from 'ink';
 import { theme } from '../semantic-colors.js';
-import { type Config } from '@qwen-code/qwen-code-core';
+import { type Config } from '@psd-tech/gusqwen-core';
 import { t } from '../../i18n/index.js';
 
 interface TipsProps {
@@ -31,7 +31,7 @@ export const Tips: React.FC<TipsProps> = ({ config }) => {
           <Text bold color={theme.text.accent}>
             QWEN.md
           </Text>{' '}
-          {t('files to customize your interactions with Qwen Code.')}
+          {t('files to customize your interactions with Gus Qwen.')}
         </Text>
       )}
       <Text color={theme.text.primary}>

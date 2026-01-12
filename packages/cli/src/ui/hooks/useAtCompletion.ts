@@ -5,8 +5,8 @@
  */
 
 import { useEffect, useReducer, useRef } from 'react';
-import type { Config, FileSearch } from '@qwen-code/qwen-code-core';
-import { FileSearchFactory, escapePath } from '@qwen-code/qwen-code-core';
+import type { Config, FileSearch } from '@psd-tech/gusqwen-core';
+import { FileSearchFactory, escapePath } from '@psd-tech/gusqwen-core';
 import type { Suggestion } from '../components/SuggestionsDisplay.js';
 import { MAX_SUGGESTIONS_TO_SHOW } from '../components/SuggestionsDisplay.js';
 
@@ -142,10 +142,13 @@ export function useAtCompletion(props: UseAtCompletionProps): void {
 
     if (state.status === AtCompletionStatus.IDLE) {
       dispatch({ type: 'INITIALIZE' });
-    } else if (
+      return;
+    }
+
+    if (
       (state.status === AtCompletionStatus.READY ||
         state.status === AtCompletionStatus.SEARCHING) &&
-      pattern !== state.pattern // Only search if the pattern has changed
+      state.pattern !== pattern
     ) {
       dispatch({ type: 'SEARCH', payload: pattern });
     }

@@ -22,7 +22,7 @@ export async function handleFallback(
 }
 
 /**
- * Handles Qwen OAuth authentication errors and rate limiting
+ * Handles Gus Qwen OAuth authentication errors and rate limiting
  */
 async function handleQwenOAuthError(error?: unknown): Promise<string | null> {
   if (!error) {
@@ -56,11 +56,11 @@ async function handleQwenOAuthError(error?: unknown): Promise<string | null> {
     errorMessage.includes('too many requests');
 
   if (isAuthError) {
-    console.warn('Qwen OAuth authentication error detected:', errorMessage);
+    console.warn('Gus Qwen OAuth authentication error detected:', errorMessage);
     // The QwenContentGenerator should automatically handle token refresh
     // If it still fails, it likely means the refresh token is also expired
     console.log(
-      'Note: If this persists, you may need to re-authenticate with Qwen OAuth',
+      'Note: If this persists, you may need to re-authenticate with Gus Qwen OAuth',
     );
     return null;
   }

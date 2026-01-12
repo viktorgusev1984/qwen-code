@@ -28,7 +28,7 @@ import {
   getEffectiveValue,
 } from '../../utils/settingsUtils.js';
 import { useVimMode } from '../contexts/VimModeContext.js';
-import { type Config } from '@qwen-code/qwen-code-core';
+import { type Config } from '@psd-tech/gusqwen-core';
 import { useKeypress } from '../hooks/useKeypress.js';
 import chalk from 'chalk';
 import { cpSlice, cpLen, stripUnsafeCharacters } from '../utils/textUtils.js';
@@ -927,7 +927,7 @@ export function SettingsDialog({
         {showRestartPrompt && (
           <Text color={theme.status.warning}>
             {t(
-              'To see changes, Qwen Code must be restarted. Press r to exit and apply changes now.',
+              'To see changes, Gus Qwen must be restarted. Press r to exit and apply changes now.',
             )}
           </Text>
         )}

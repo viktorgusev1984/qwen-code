@@ -1,10 +1,10 @@
 /**
  * @license
- * Copyright 2025 Qwen Team
+ * Copyright 2025 Gus Qwen Team
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import type { Config } from '@qwen-code/qwen-code-core';
+import type { Config } from '@psd-tech/gusqwen-core';
 import type { CLIAssistantMessage, CLIMessage } from '../types.js';
 import {
   BaseJsonOutputAdapter,

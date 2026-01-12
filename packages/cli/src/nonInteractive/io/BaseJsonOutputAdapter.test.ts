@@ -1,6 +1,6 @@
 /**
  * @license
- * Copyright 2025 Qwen Team
+ * Copyright 2025 Gus Qwen Team
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -10,8 +10,9 @@ import {
   type Config,
   type ServerGeminiStreamEvent,
   type ToolCallRequestInfo,
+  type ToolCallResponseInfo,
   type TaskResultDisplay,
-} from '@qwen-code/qwen-code-core';
+} from '@psd-tech/gusqwen-core';
 import type { Part, GenerateContentResponseUsageMetadata } from '@google/genai';
 import type {
   CLIMessage,
@@ -1161,6 +1162,46 @@ describe('BaseJsonOutputAdapter', () => {
 
       if (!result.is_error) {
         expect(result.result).toBe('');
+      }
+    });
+
+    it('should fall back to last tool result when assistant text is empty', () => {
+      adapter = new TestJsonOutputAdapter(mockConfig);
+      const request: ToolCallRequestInfo = {
+        callId: 'call-1',
+        name: 'grep_search',
+        args: {},
+        isClientInitiated: false,
+        prompt_id: 'prompt-1',
+        response_id: 'response-1',
+      };
+      const response: ToolCallResponseInfo = {
+        callId: 'call-1',
+        responseParts: [
+          {
+            functionResponse: {
+              id: 'call-1',
+              name: 'grep_search',
+              response: { output: 'match found' },
+            },
+          },
+        ],
+        resultDisplay: undefined,
+        error: undefined,
+        errorType: undefined,
+      };
+
+      adapter.emitToolResult(request, response);
+
+      const result = adapter.exposeBuildResultMessage({
+        isError: false,
+        durationMs: 10,
+        apiDurationMs: 5,
+        numTurns: 1,
+      });
+
+      if (!result.is_error) {
+        expect(result.result).toContain('match found');
       }
     });
   });

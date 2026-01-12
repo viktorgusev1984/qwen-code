@@ -50,7 +50,7 @@ function getOpenUrlsCommands(readmeUrl: string): string[] {
   return commands;
 }
 
-// Add Qwen Code specific entries to .gitignore file
+// Add Gus Qwen specific entries to .gitignore file
 export async function updateGitignore(gitRepoRoot: string): Promise<void> {
   const gitignoreEntries = ['.qwen/', 'gha-creds-*.json'];
 
@@ -121,7 +121,7 @@ export const setupGithubCommand: SlashCommand = {
     // Get the latest release tag from GitHub
     const proxy = context?.services?.config?.getProxy();
     const releaseTag = await getLatestGitHubRelease(proxy);
-    const readmeUrl = `https://github.com/QwenLM/qwen-code-action/blob/${releaseTag}/README.md#quick-start`;
+    const readmeUrl = `https://github.com/GusQwen/gusqwen-action/blob/${releaseTag}/README.md#quick-start`;
 
     // Create the .github/workflows directory to download the files into
     const githubWorkflowsDir = path.join(gitRepoRoot, '.github', 'workflows');
@@ -143,7 +143,7 @@ export const setupGithubCommand: SlashCommand = {
     for (const workflow of GITHUB_WORKFLOW_PATHS) {
       downloads.push(
         (async () => {
-          const endpoint = `https://raw.githubusercontent.com/QwenLM/qwen-code-action/refs/tags/${releaseTag}/examples/workflows/${workflow}`;
+          const endpoint = `https://raw.githubusercontent.com/GusQwen/gusqwen-action/refs/tags/${releaseTag}/examples/workflows/${workflow}`;
           const response = await fetch(endpoint, {
             method: 'GET',
             dispatcher: proxy ? new ProxyAgent(proxy) : undefined,

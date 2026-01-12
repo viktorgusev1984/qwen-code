@@ -6,14 +6,19 @@
 
 import { useCallback, useMemo, useEffect } from 'react';
 import type { Suggestion } from '../components/SuggestionsDisplay.js';
-import type { CommandContext, SlashCommand } from '../commands/types.js';
+import {
+  CommandKind,
+  type CommandContext,
+  type SlashCommand,
+} from '../commands/types.js';
 import type { TextBuffer } from '../components/shared/text-buffer.js';
 import { logicalPosToOffset } from '../components/shared/text-buffer.js';
 import { isSlashCommand } from '../utils/commandUtils.js';
 import { toCodePoints } from '../utils/textUtils.js';
+import { parseSlashCommand } from '../../utils/commands.js';
 import { useAtCompletion } from './useAtCompletion.js';
 import { useSlashCompletion } from './useSlashCompletion.js';
-import type { Config } from '@qwen-code/qwen-code-core';
+import type { Config } from '@psd-tech/gusqwen-core';
 import { useCompletion } from './useCompletion.js';
 
 export enum CompletionMode {
@@ -72,51 +77,72 @@ export function useCommandCompletion(
   const { completionMode, query, completionStart, completionEnd } =
     useMemo(() => {
       const currentLine = buffer.lines[cursorRow] || '';
-      if (cursorRow === 0 && isSlashCommand(currentLine.trim())) {
-        return {
-          completionMode: CompletionMode.SLASH,
-          query: currentLine,
-          completionStart: 0,
-          completionEnd: currentLine.length,
-        };
-      }
+      const lineToCursor = currentLine.slice(0, cursorCol);
 
+      const allowAtCompletion = (() => {
+        if (!lineToCursor.startsWith('/')) {
+          return true;
+        }
+        const { commandToExecute } = parseSlashCommand(
+          lineToCursor,
+          slashCommands,
+        );
+        if (commandToExecute?.kind === CommandKind.BUILT_IN) {
+          return false;
+        }
+        return true;
+      })();
+      
+      // Ищем @ в строке, начиная с позиции курсора и двигаясь назад
       const codePoints = toCodePoints(currentLine);
-      for (let i = cursorCol - 1; i >= 0; i--) {
-        const char = codePoints[i];
+      if (allowAtCompletion) {
+        for (let i = cursorCol - 1; i >= 0; i--) {
+          const char = codePoints[i];
 
-        if (char === ' ') {
-          let backslashCount = 0;
-          for (let j = i - 1; j >= 0 && codePoints[j] === '\\'; j--) {
-            backslashCount++;
-          }
-          if (backslashCount % 2 === 0) {
-            break;
-          }
-        } else if (char === '@') {
-          let end = codePoints.length;
-          for (let i = cursorCol; i < codePoints.length; i++) {
-            if (codePoints[i] === ' ') {
-              let backslashCount = 0;
-              for (let j = i - 1; j >= 0 && codePoints[j] === '\\'; j--) {
-                backslashCount++;
-              }
+          if (char === ' ') {
+            let backslashCount = 0;
+            for (let j = i - 1; j >= 0 && codePoints[j] === '\\'; j--) {
+              backslashCount++;
+            }
+            if (backslashCount % 2 === 0) {
+              break;
+            }
+          } else if (char === '@') {
+            // Найден @, начинаем поиск конца пути
+            let end = codePoints.length;
+            for (let i = cursorCol; i < codePoints.length; i++) {
+              if (codePoints[i] === ' ') {
+                let backslashCount = 0;
+                for (let j = i - 1; j >= 0 && codePoints[j] === '\\'; j--) {
+                  backslashCount++;
+                }
 
-              if (backslashCount % 2 === 0) {
-                end = i;
-                break;
+                if (backslashCount % 2 === 0) {
+                  end = i;
+                  break;
+                }
               }
             }
+            const pathStart = i + 1;
+            const partialPath = currentLine.substring(pathStart, end);
+            return {
+              completionMode: CompletionMode.AT,
+              query: partialPath,
+              completionStart: pathStart,
+              completionEnd: end,
+            };
           }
-          const pathStart = i + 1;
-          const partialPath = currentLine.substring(pathStart, end);
-          return {
-            completionMode: CompletionMode.AT,
-            query: partialPath,
-            completionStart: pathStart,
-            completionEnd: end,
-          };
         }
+      }
+
+      // Проверяем, начинается ли строка с команды
+      if (cursorRow === 0 && isSlashCommand(lineToCursor)) {
+        return {
+          completionMode: CompletionMode.SLASH,
+          query: lineToCursor,
+          completionStart: 0,
+          completionEnd: lineToCursor.length,
+        };
       }
 
       return {
@@ -125,7 +151,7 @@ export function useCommandCompletion(
         completionStart: -1,
         completionEnd: -1,
       };
-    }, [cursorRow, cursorCol, buffer.lines]);
+    }, [cursorRow, cursorCol, buffer.lines, slashCommands]);
 
   useAtCompletion({
     enabled: completionMode === CompletionMode.AT,

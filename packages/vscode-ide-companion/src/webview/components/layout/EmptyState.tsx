@@ -1,6 +1,6 @@
 /**
  * @license
- * Copyright 2025 Qwen Team
+ * Copyright 2025 Gus Qwen Team
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -20,10 +20,10 @@ export const EmptyState: React.FC<EmptyStateProps> = ({
   const iconUri = generateIconUrl('icon.png');
 
   const description = loadingMessage
-    ? 'Preparing Qwen Code…'
+    ? 'Preparing Gus Qwen…'
     : isAuthenticated
       ? 'What would you like to do? Ask about this codebase or we can start writing code.'
-      : 'Welcome! Please log in to start using Qwen Code.';
+      : 'Welcome! Please log in to start using Gus Qwen.';
 
   return (
     <div className="flex flex-col items-center justify-center h-full p-5 md:p-10">

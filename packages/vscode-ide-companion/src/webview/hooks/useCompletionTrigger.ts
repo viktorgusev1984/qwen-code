@@ -1,6 +1,6 @@
 /**
  * @license
- * Copyright 2025 Qwen Team
+ * Copyright 2025 Gus Qwen Team
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -281,6 +281,7 @@ export function useCompletionTrigger(
       const effectiveCursorPosition =
         cursorPosition === 0 && text.length > 0 ? text.length : cursorPosition;
 
+      const ZERO_WIDTH_SPACE = '\u200B';
       const textBeforeCursor = text.substring(0, effectiveCursorPosition);
       const lastAtMatch = textBeforeCursor.lastIndexOf('@');
       const lastSlashMatch = textBeforeCursor.lastIndexOf('/');
@@ -289,25 +290,53 @@ export function useCompletionTrigger(
       let triggerPos = -1;
       let triggerChar: '@' | '/' | null = null;
 
-      if (lastAtMatch > lastSlashMatch) {
-        triggerPos = lastAtMatch;
-        triggerChar = '@';
-      } else if (lastSlashMatch > lastAtMatch) {
-        triggerPos = lastSlashMatch;
-        triggerChar = '/';
+      if (lastAtMatch >= 0) {
+        const charBeforeAt =
+          lastAtMatch > 0 ? textBeforeCursor[lastAtMatch - 1] : ' ';
+        const isAtBoundary =
+          charBeforeAt === ' ' ||
+          charBeforeAt === '\n' ||
+          charBeforeAt === ZERO_WIDTH_SPACE ||
+          lastAtMatch === 0;
+        const atQuery = textBeforeCursor.substring(lastAtMatch + 1);
+        const hasWhitespace = atQuery.includes(' ') || atQuery.includes('\n');
+        if (isAtBoundary && !hasWhitespace) {
+          triggerPos = lastAtMatch;
+          triggerChar = '@';
+        }
       }
 
+      if (triggerChar === null && lastSlashMatch >= 0) {
+        const charBeforeSlash =
+          lastSlashMatch > 0 ? textBeforeCursor[lastSlashMatch - 1] : ' ';
+        const isSlashBoundary =
+          charBeforeSlash === ' ' ||
+          charBeforeSlash === '\n' ||
+          charBeforeSlash === ZERO_WIDTH_SPACE ||
+          lastSlashMatch === 0;
+        if (isSlashBoundary) {
+          triggerPos = lastSlashMatch;
+          triggerChar = '/';
+        }
+      }
       // Check if trigger is at word boundary (start of line or after space)
       if (triggerPos >= 0 && triggerChar) {
         const charBefore = triggerPos > 0 ? text[triggerPos - 1] : ' ';
         const isValidTrigger =
-          charBefore === ' ' || charBefore === '\n' || triggerPos === 0;
+          charBefore === ' ' ||
+          charBefore === '\n' ||
+          charBefore === ZERO_WIDTH_SPACE ||
+          triggerPos === 0;
 
         if (isValidTrigger) {
           const query = text.substring(triggerPos + 1, effectiveCursorPosition);
 
-          // Only show if query doesn't contain spaces (still typing the reference)
-          if (!query.includes(' ') && !query.includes('\n')) {
+          const hasNewline = query.includes('\n');
+          const hasSpace = query.includes(' ');
+          const allowSpaces = triggerChar === '/';
+
+          // For @, only show while typing the reference. For /, allow spaces to drill into subcommands.
+          if (!hasNewline && (allowSpaces || !hasSpace)) {
             // Get precise cursor position for menu
             const cursorPos = getCursorPosition();
             if (cursorPos) {

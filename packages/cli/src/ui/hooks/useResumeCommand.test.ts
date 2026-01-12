@@ -1,6 +1,6 @@
 /**
  * @license
- * Copyright 2025 Qwen Code
+ * Copyright 2025 Gus Qwen
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -40,7 +40,7 @@ vi.mock('../utils/resumeHistoryUtils.js', () => ({
   buildResumedHistoryItems: vi.fn(() => [{ id: 1, type: 'user', text: 'hi' }]),
 }));
 
-vi.mock('@qwen-code/qwen-code-core', () => {
+vi.mock('@psd-tech/gusqwen-core', () => {
   class SessionService {
     constructor(_cwd: string) {}
     async loadSession(_sessionId: string) {
@@ -142,7 +142,7 @@ describe('useResumeCommand', () => {
       getTargetDir: () => '/tmp',
       getGeminiClient: () => geminiClient,
       startNewSession: vi.fn(),
-    } as unknown as import('@qwen-code/qwen-code-core').Config;
+    } as unknown as import('@psd-tech/gusqwen-core').Config;
 
     const { result } = renderHook(() =>
       useResumeCommand({

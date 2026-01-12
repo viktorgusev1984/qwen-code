@@ -9,9 +9,9 @@ import { getInstallationInfo, PackageManager } from './installationInfo.js';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as childProcess from 'node:child_process';
-import { isGitRepository } from '@qwen-code/qwen-code-core';
+import { isGitRepository } from '@psd-tech/gusqwen-core';
 
-vi.mock('@qwen-code/qwen-code-core', () => ({
+vi.mock('@psd-tech/gusqwen-core', () => ({
   isGitRepository: vi.fn(),
 }));
 
@@ -140,7 +140,7 @@ describe('getInstallationInfo', () => {
     const info = getInstallationInfo(projectRoot, false);
 
     expect(mockedExecSync).toHaveBeenCalledWith(
-      'brew list -1 | grep -q "^qwen-code$"',
+      'brew list -1 | grep -q "^gusqwen$"',
       { stdio: 'ignore' },
     );
     expect(info.packageManager).toBe(PackageManager.HOMEBREW);
@@ -162,7 +162,7 @@ describe('getInstallationInfo', () => {
     const info = getInstallationInfo(projectRoot, false);
 
     expect(mockedExecSync).toHaveBeenCalledWith(
-      'brew list -1 | grep -q "^qwen-code$"',
+      'brew list -1 | grep -q "^gusqwen$"',
       { stdio: 'ignore' },
     );
     // Should fall back to default global npm
@@ -171,7 +171,7 @@ describe('getInstallationInfo', () => {
   });
 
   it('should detect global pnpm installation', () => {
-    const pnpmPath = `/Users/test/.pnpm/global/5/node_modules/.pnpm/some-hash/node_modules/@qwen-code/qwen-code/dist/index.js`;
+    const pnpmPath = `/Users/test/.pnpm/global/5/node_modules/.pnpm/some-hash/node_modules/@psd-tech/gusqwen/dist/index.js`;
     process.argv[1] = pnpmPath;
     mockedRealPathSync.mockReturnValue(pnpmPath);
     mockedExecSync.mockImplementation(() => {
@@ -181,7 +181,7 @@ describe('getInstallationInfo', () => {
     const info = getInstallationInfo(projectRoot, false);
     expect(info.packageManager).toBe(PackageManager.PNPM);
     expect(info.isGlobal).toBe(true);
-    expect(info.updateCommand).toBe('pnpm add -g @qwen-code/qwen-code@latest');
+    expect(info.updateCommand).toBe('pnpm add -g @psd-tech/gusqwen@latest');
     expect(info.updateMessage).toContain('Attempting to automatically update');
 
     const infoDisabled = getInstallationInfo(projectRoot, true);
@@ -189,7 +189,7 @@ describe('getInstallationInfo', () => {
   });
 
   it('should detect global yarn installation', () => {
-    const yarnPath = `/Users/test/.yarn/global/node_modules/@qwen-code/qwen-code/dist/index.js`;
+    const yarnPath = `/Users/test/.yarn/global/node_modules/@psd-tech/gusqwen/dist/index.js`;
     process.argv[1] = yarnPath;
     mockedRealPathSync.mockReturnValue(yarnPath);
     mockedExecSync.mockImplementation(() => {
@@ -199,9 +199,7 @@ describe('getInstallationInfo', () => {
     const info = getInstallationInfo(projectRoot, false);
     expect(info.packageManager).toBe(PackageManager.YARN);
     expect(info.isGlobal).toBe(true);
-    expect(info.updateCommand).toBe(
-      'yarn global add @qwen-code/qwen-code@latest',
-    );
+    expect(info.updateCommand).toBe('yarn global add @psd-tech/gusqwen@latest');
     expect(info.updateMessage).toContain('Attempting to automatically update');
 
     const infoDisabled = getInstallationInfo(projectRoot, true);
@@ -219,7 +217,7 @@ describe('getInstallationInfo', () => {
     const info = getInstallationInfo(projectRoot, false);
     expect(info.packageManager).toBe(PackageManager.BUN);
     expect(info.isGlobal).toBe(true);
-    expect(info.updateCommand).toBe('bun add -g @qwen-code/qwen-code@latest');
+    expect(info.updateCommand).toBe('bun add -g @psd-tech/gusqwen@latest');
     expect(info.updateMessage).toContain('Attempting to automatically update');
 
     const infoDisabled = getInstallationInfo(projectRoot, true);
@@ -304,9 +302,7 @@ describe('getInstallationInfo', () => {
     const info = getInstallationInfo(projectRoot, false);
     expect(info.packageManager).toBe(PackageManager.NPM);
     expect(info.isGlobal).toBe(true);
-    expect(info.updateCommand).toBe(
-      'npm install -g @qwen-code/qwen-code@latest',
-    );
+    expect(info.updateCommand).toBe('npm install -g @psd-tech/gusqwen@latest');
     expect(info.updateMessage).toContain('Attempting to automatically update');
 
     const infoDisabled = getInstallationInfo(projectRoot, true);

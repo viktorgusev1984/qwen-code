@@ -65,7 +65,7 @@ import { reportError } from '../utils/errorReporting.js';
 import { getErrorMessage } from '../utils/errors.js';
 import { checkNextSpeaker } from '../utils/nextSpeakerChecker.js';
 import { flatMapTextParts } from '../utils/partUtils.js';
-import { retryWithBackoff } from '../utils/retry.js';
+import { retryWithBackoffAndResetOn429 } from '../utils/retry.js';
 
 // IDE integration
 import { ideContextStore } from '../ide/ideContext.js';
@@ -384,15 +384,63 @@ export class GeminiClient {
     options?: { isContinuation: boolean },
     turns: number = MAX_TURNS,
   ): AsyncGenerator<ServerGeminiStreamEvent, Turn> {
+    return yield* this.sendMessageInternal(
+      'stream',
+      request,
+      signal,
+      prompt_id,
+      options,
+      turns,
+    );
+  }
+
+  async *sendMessageSync(
+    request: PartListUnion,
+    signal: AbortSignal,
+    prompt_id: string,
+    options?: { isContinuation: boolean },
+    turns: number = MAX_TURNS,
+  ): AsyncGenerator<ServerGeminiStreamEvent, Turn> {
+    return yield* this.sendMessageInternal(
+      'sync',
+      request,
+      signal,
+      prompt_id,
+      options,
+      turns,
+    );
+  }
+
+  async *sendMessage(
+    request: PartListUnion,
+    signal: AbortSignal,
+    prompt_id: string,
+    options?: { isContinuation: boolean },
+    turns: number = MAX_TURNS,
+  ): AsyncGenerator<ServerGeminiStreamEvent, Turn> {
+    return yield* this.sendMessageSync(request, signal, prompt_id, options, turns);
+  }
+
+  private async *sendMessageInternal(
+    mode: 'stream' | 'sync',
+    request: PartListUnion,
+    signal: AbortSignal,
+    prompt_id: string,
+    options?: { isContinuation: boolean },
+    turns: number = MAX_TURNS,
+  ): AsyncGenerator<ServerGeminiStreamEvent, Turn> {
     if (!options?.isContinuation) {
-      this.loopDetector.reset(prompt_id);
-      this.lastPromptId = prompt_id;
+      const isNewPrompt = this.lastPromptId !== prompt_id;
+      if (isNewPrompt) {
+        this.loopDetector.reset(prompt_id);
+        this.lastPromptId = prompt_id;
 
-      // record user message for session management
-      this.config.getChatRecordingService()?.recordUserMessage(request);
+        // record user message for session management
+        this.config.getChatRecordingService()?.recordUserMessage(request);
 
-      // strip thoughts from history before sending the message
-      this.stripThoughtsFromHistory();
+        // strip thoughts from history before sending the message
+        this.stripThoughtsFromHistory();
+      }
     }
     this.sessionTurnCount++;
     if (
@@ -494,8 +542,26 @@ export class GeminiClient {
     if (!this.config.getSkipLoopDetection()) {
       const loopDetected = await this.loopDetector.turnStarted(signal);
       if (loopDetected) {
-        yield { type: GeminiEventType.LoopDetected };
-        return turn;
+        const loopDetectionCount = this.loopDetector.getLoopDetectionCount();
+
+        // For first two detections, add warning to user message instead of emitting error
+        if (loopDetectionCount <= 2) {
+          // Add warning message to history
+          this.getChat().addHistory({
+            role: 'user',
+            parts: [
+              {
+                text: 'Внимание: обнаружены повторные вызовы. Пожалуйста, используйте другой подход для решения задачи.',
+              },
+            ],
+          });
+
+          // Continue processing without emitting loop detected event
+        } else {
+          // For third and subsequent detections, emit loop detected event
+          yield { type: GeminiEventType.LoopDetected };
+          return turn;
+        }
       }
     }
 
@@ -532,11 +598,37 @@ export class GeminiClient {
     for await (const event of resultStream) {
       if (!this.config.getSkipLoopDetection()) {
         if (this.loopDetector.addAndCheck(event)) {
-          yield { type: GeminiEventType.LoopDetected };
-          return turn;
+          // const loopType = this.loopDetector.getLastDetectedLoopType();
+          const loopDetectionCount = this.loopDetector.getLoopDetectionCount();
+
+          // For first two detections, add warning to user message instead of emitting error
+          if (loopDetectionCount <= 2) {
+            // Add warning message to history
+            this.getChat().addHistory({
+              role: 'user',
+              parts: [
+                {
+                  text: 'Внимание: обнаружены повторные вызовы. Пожалуйста, используйте другой подход для решения задачи.',
+                },
+              ],
+            });
+
+            // Continue processing without emitting loop detected event
+            yield event;
+          } else {
+            // For third and subsequent detections, emit loop detected event
+            yield {
+              type: GeminiEventType.LoopDetected
+            };
+            return turn;
+          }
+        } else {
+          yield event;
         }
+      } else {
+        yield event;
       }
-      yield event;
+
       if (event.type === GeminiEventType.Error) {
         return turn;
       }
@@ -569,7 +661,8 @@ export class GeminiClient {
         const nextRequest = [{ text: 'Please continue.' }];
         // This recursive call's events will be yielded out, but the final
         // turn object will be from the top-level call.
-        yield* this.sendMessageStream(
+        yield* this.sendMessageInternal(
+          mode,
           nextRequest,
           signal,
           prompt_id,
@@ -623,7 +716,7 @@ export class GeminiClient {
         // Pass the captured model to the centralized handler.
         await handleFallback(this.config, currentAttemptModel, authType, error);
 
-      const result = await retryWithBackoff(apiCall, {
+      const result = await retryWithBackoffAndResetOn429(apiCall, {
         onPersistent429: onPersistent429Callback,
         authType: this.config.getContentGeneratorConfig()?.authType,
       });

@@ -21,7 +21,7 @@ import {
   type SDKMessage,
   type ControlMessage,
   type ToolUseBlock,
-} from '@qwen-code/sdk';
+} from '@psd-tech/gusqwen-sdk';
 import { SDKTestHelper, createSharedTestOptions } from './test-helper.js';
 
 const SHARED_TEST_OPTIONS = createSharedTestOptions();

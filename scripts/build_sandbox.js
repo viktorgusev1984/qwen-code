@@ -90,23 +90,23 @@ if (!argv.s) {
   execSync('npm run build --workspaces', { stdio: 'inherit' });
 }
 
-console.log('packing @qwen-code/qwen-code ...');
+console.log('packing @psd-tech/gusqwen ...');
 const cliPackageDir = join('packages', 'cli');
-rmSync(join(cliPackageDir, 'dist', 'qwen-code-*.tgz'), { force: true });
+rmSync(join(cliPackageDir, 'dist', 'gusqwen-*.tgz'), { force: true });
 execSync(
-  `npm pack -w @qwen-code/qwen-code --pack-destination ./packages/cli/dist`,
+  `npm pack -w @psd-tech/gusqwen --pack-destination ./packages/cli/dist`,
   {
     stdio: 'ignore',
   },
 );
 
-console.log('packing @qwen-code/qwen-code-core ...');
+console.log('packing @psd-tech/gusqwen-core ...');
 const corePackageDir = join('packages', 'core');
-rmSync(join(corePackageDir, 'dist', 'qwen-code-core-*.tgz'), {
+rmSync(join(corePackageDir, 'dist', 'gusqwen-core-*.tgz'), {
   force: true,
 });
 execSync(
-  `npm pack -w @qwen-code/qwen-code-core --pack-destination ./packages/core/dist`,
+  `npm pack -w @psd-tech/gusqwen-core --pack-destination ./packages/core/dist`,
   { stdio: 'ignore' },
 );
 
@@ -115,15 +115,11 @@ const packageVersion = JSON.parse(
 ).version;
 
 chmodSync(
-  join(cliPackageDir, 'dist', `qwen-code-qwen-code-${packageVersion}.tgz`),
+  join(cliPackageDir, 'dist', `psq-tech-gusqwen-${packageVersion}.tgz`),
   0o755,
 );
 chmodSync(
-  join(
-    corePackageDir,
-    'dist',
-    `qwen-code-qwen-code-core-${packageVersion}.tgz`,
-  ),
+  join(corePackageDir, 'dist', `psd-tech-gusqwen-core-${packageVersion}.tgz`),
   0o755,
 );
 

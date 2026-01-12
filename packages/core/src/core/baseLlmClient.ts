@@ -17,7 +17,7 @@ import type { Config } from '../config/config.js';
 import type { ContentGenerator } from './contentGenerator.js';
 import { reportError } from '../utils/errorReporting.js';
 import { getErrorMessage } from '../utils/errors.js';
-import { retryWithBackoff } from '../utils/retry.js';
+import { retryWithBackoffAndResetOn429 } from '../utils/retry.js';
 import { getFunctionCalls } from '../utils/generateContentResponseUtilities.js';
 
 const DEFAULT_MAX_ATTEMPTS = 5;
@@ -64,6 +64,12 @@ export interface GenerateJsonOptions {
  * A client dedicated to stateless, utility-focused LLM calls.
  */
 export class BaseLlmClient {
+  // Default configuration for utility tasks
+  private readonly defaultUtilityConfig: GenerateContentConfig = {
+    temperature: 0,
+    topP: 1,
+  };
+
   constructor(
     private readonly contentGenerator: ContentGenerator,
     private readonly config: Config,
@@ -84,6 +90,7 @@ export class BaseLlmClient {
 
     const requestConfig: GenerateContentConfig = {
       abortSignal,
+      ...this.defaultUtilityConfig,
       ...options.config,
       ...(systemInstruction && { systemInstruction }),
     };
@@ -115,7 +122,7 @@ export class BaseLlmClient {
           promptId ?? '',
         );
 
-      const result = await retryWithBackoff(apiCall, {
+      const result = await retryWithBackoffAndResetOn429(apiCall, {
         maxAttempts: maxAttempts ?? DEFAULT_MAX_ATTEMPTS,
       });
 

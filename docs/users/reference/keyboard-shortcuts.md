@@ -1,6 +1,6 @@
-# Qwen Code Keyboard Shortcuts
+# Gus Qwen Keyboard Shortcuts
 
-This document lists the available keyboard shortcuts in Qwen Code.
+This document lists the available keyboard shortcuts in Gus Qwen.
 
 ## General
 

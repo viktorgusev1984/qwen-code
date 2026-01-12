@@ -1,6 +1,6 @@
 /**
  * @license
- * Copyright 2025 Qwen Team
+ * Copyright 2025 Gus Qwen Team
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -21,12 +21,12 @@ import type {
   ContentBlock,
   TextBlock,
   ToolUseBlock,
-} from '@qwen-code/sdk';
+} from '@psd-tech/gusqwen-sdk';
 import {
   isSDKAssistantMessage,
   isSDKSystemMessage,
   isSDKResultMessage,
-} from '@qwen-code/sdk';
+} from '@psd-tech/gusqwen-sdk';
 
 // ============================================================================
 // Core Test Helper Class
@@ -208,7 +208,7 @@ export interface MCPServerResult {
 const MCP_MATH_SERVER_SCRIPT = `#!/usr/bin/env node
 /**
  * @license
- * Copyright 2025 Qwen Team
+ * Copyright 2025 Gus Qwen Team
  * SPDX-License-Identifier: Apache-2.0
  */
 

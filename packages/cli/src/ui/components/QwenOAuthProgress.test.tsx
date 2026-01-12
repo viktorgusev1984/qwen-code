@@ -8,7 +8,7 @@
 import { render } from 'ink-testing-library';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { QwenOAuthProgress } from './QwenOAuthProgress.js';
-import type { DeviceAuthorizationData } from '@qwen-code/qwen-code-core';
+import type { DeviceAuthorizationData } from '@psd-tech/gusqwen-core';
 import { useKeypress } from '../hooks/useKeypress.js';
 import type { Key } from '../contexts/KeypressContext.js';
 
@@ -96,7 +96,7 @@ describe('QwenOAuthProgress', () => {
 
       const output = lastFrame();
       expect(output).toContain('MockSpinner(dots)');
-      expect(output).toContain('Waiting for Qwen OAuth authentication...');
+      expect(output).toContain('Waiting for Gus Qwen OAuth authentication...');
       expect(output).toContain('(Press ESC or CTRL+C to cancel)');
     });
 
@@ -105,7 +105,7 @@ describe('QwenOAuthProgress', () => {
       const output = lastFrame();
 
       // Should not contain auth flow elements
-      expect(output).not.toContain('Qwen OAuth Authentication');
+      expect(output).not.toContain('Gus Qwen OAuth Authentication');
       expect(output).not.toContain('Please visit this URL to authorize:');
       // Loading state still shows time remaining with default timeout
       expect(output).toContain('Time remaining:');
@@ -553,7 +553,7 @@ describe('QwenOAuthProgress', () => {
         <QwenOAuthProgress onTimeout={mockOnTimeout} onCancel={mockOnCancel} />,
       );
 
-      expect(lastFrame()).toContain('Waiting for Qwen OAuth authentication...');
+      expect(lastFrame()).toContain('Waiting for Gus Qwen OAuth authentication...');
       expect(lastFrame()).not.toContain('Waiting for authorization');
     });
   });
@@ -566,7 +566,7 @@ describe('QwenOAuthProgress', () => {
       });
 
       const output = lastFrame();
-      expect(output).toContain('Qwen OAuth Authentication Timeout');
+      expect(output).toContain('Gus Qwen OAuth Authentication Timeout');
       expect(output).toContain('Custom timeout message');
       expect(output).toContain(
         'Press any key to return to authentication type selection.',
@@ -579,7 +579,7 @@ describe('QwenOAuthProgress', () => {
       });
 
       const output = lastFrame();
-      expect(output).toContain('Qwen OAuth Authentication Timeout');
+      expect(output).toContain('Gus Qwen OAuth Authentication Timeout');
       expect(output).toContain(
         'OAuth token expired (over 300 seconds). Please select authentication method again.',
       );

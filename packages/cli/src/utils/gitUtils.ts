@@ -58,7 +58,7 @@ export const getLatestGitHubRelease = async (
   try {
     const controller = new AbortController();
 
-    const endpoint = `https://api.github.com/repos/QwenLM/qwen-code-action/releases/latest`;
+    const endpoint = `https://api.github.com/repos/GusQwen/gusqwen-action/releases/latest`;
 
     const response = await fetch(endpoint, {
       method: 'GET',
@@ -84,11 +84,11 @@ export const getLatestGitHubRelease = async (
     return releaseTag;
   } catch (_error) {
     console.debug(
-      `Failed to determine latest qwen-code-action release:`,
+      `Failed to determine latest gusqwen-action release:`,
       _error,
     );
     throw new Error(
-      `Unable to determine the latest qwen-code-action release on GitHub.`,
+      `Unable to determine the latest gusqwen-action release on GitHub.`,
     );
   }
 };

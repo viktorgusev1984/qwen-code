@@ -191,6 +191,29 @@ describe('ReadFileTool', () => {
       });
     });
 
+    it('should explain when path looks like a glob pattern', async () => {
+      const filePath = path.join(tempRootDir, 'AgentExecutionDisplay.*');
+      const params: ReadFileToolParams = { absolute_path: filePath };
+      const invocation = tool.build(params) as ToolInvocation<
+        ReadFileToolParams,
+        ToolResult
+      >;
+
+      const result = await invocation.execute(abortSignal);
+      expect(result).toEqual({
+        llmContent:
+          'Could not read file because no file was found at the specified path.' +
+          ' The path looks like a glob pattern. read_file does not expand wildcards. ' +
+          'Use the glob tool with pattern "AgentExecutionDisplay.*" to find matching files, then call read_file with the exact path.',
+        returnDisplay:
+          'File not found. The path looks like a glob pattern; read_file does not expand wildcards.',
+        error: {
+          message: `File not found: ${filePath}`,
+          type: ToolErrorType.FILE_NOT_FOUND,
+        },
+      });
+    });
+
     it('should return success result for a text file', async () => {
       const filePath = path.join(tempRootDir, 'textfile.txt');
       const fileContent = 'This is a test file.';

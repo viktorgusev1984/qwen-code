@@ -12,7 +12,7 @@ import { SessionStatsProvider } from '../contexts/SessionContext.js';
 import type {
   Config,
   ToolExecuteConfirmationDetails,
-} from '@qwen-code/qwen-code-core';
+} from '@psd-tech/gusqwen-core';
 import { ToolGroupMessage } from './messages/ToolGroupMessage.js';
 import { renderWithProviders } from '../../test-utils/render.js';
 import { ConfigContext } from '../contexts/ConfigContext.js';
@@ -96,7 +96,7 @@ describe('<HistoryItemDisplay />', () => {
     const { lastFrame } = renderWithProviders(
       <HistoryItemDisplay {...baseItem} item={item} />,
     );
-    expect(lastFrame()).toContain('About Qwen Code');
+    expect(lastFrame()).toContain('About Gus Qwen');
   });
 
   it('renders ModelStatsDisplay for "model_stats" type', () => {

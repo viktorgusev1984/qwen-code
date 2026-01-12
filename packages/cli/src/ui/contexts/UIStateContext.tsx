@@ -23,7 +23,7 @@ import type {
   IdeContext,
   ApprovalMode,
   IdeInfo,
-} from '@qwen-code/qwen-code-core';
+} from '@psd-tech/gusqwen-core';
 import type { DOMElement } from 'ink';
 import type { SessionStatsState } from '../contexts/SessionContext.js';
 import type { ExtensionUpdateState } from '../state/extensions.js';
@@ -42,7 +42,7 @@ export interface UIState {
   authError: string | null;
   isAuthDialogOpen: boolean;
   pendingAuthType: AuthType | undefined;
-  // Qwen OAuth state
+  // Gus Qwen OAuth state
   qwenAuthState: QwenAuthState;
   editorError: string | null;
   isEditorDialogOpen: boolean;

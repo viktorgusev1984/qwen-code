@@ -29,6 +29,7 @@ import {
   logToolOutputTruncated,
   ToolOutputTruncatedEvent,
   InputFormat,
+  ToolNames,
 } from '../index.js';
 import type { Part, PartListUnion } from '@google/genai';
 import { getResponseTextFromParts } from '../utils/generateContentResponseUtilities.js';
@@ -144,6 +145,8 @@ export type AllToolCallsCompleteHandler = (
 
 export type ToolCallsUpdateHandler = (toolCalls: ToolCall[]) => void;
 
+const READ_FILE_NOT_FOUND_HINT_THRESHOLD = 2;
+
 /**
  * Formats tool output for a Gemini FunctionResponse.
  */
@@ -161,6 +164,15 @@ function createFunctionResponsePart(
   };
 }
 
+function sanitizeToolOutput(output: string): string {
+  if (!output.includes('<tool_call>')) return output;
+  const cleaned = output.replace(/<\s*\/?tool_call\s*>/gi, '').trim();
+  const looksLikeToolRequest = /^\s*\{[\s\S]*"name"\s*:\s*".+?"[\s\S]*"arguments"\s*:\s*\{/i.test(
+    cleaned,
+  );
+  return looksLikeToolRequest ? '' : cleaned;
+}
+
 export function convertToFunctionResponse(
   toolName: string,
   callId: string,
@@ -172,7 +184,13 @@ export function convertToFunctionResponse(
       : llmContent;
 
   if (typeof contentToProcess === 'string') {
-    return [createFunctionResponsePart(callId, toolName, contentToProcess)];
+    return [
+      createFunctionResponsePart(
+        callId,
+        toolName,
+        sanitizeToolOutput(contentToProcess),
+      ),
+    ];
   }
 
   if (Array.isArray(contentToProcess)) {
@@ -212,7 +230,11 @@ export function convertToFunctionResponse(
 
   if (contentToProcess.text !== undefined) {
     return [
-      createFunctionResponsePart(callId, toolName, contentToProcess.text),
+      createFunctionResponsePart(
+        callId,
+        toolName,
+        sanitizeToolOutput(contentToProcess.text),
+      ),
     ];
   }
 
@@ -226,9 +248,13 @@ function toParts(input: PartListUnion): Part[] {
   const parts: Part[] = [];
   for (const part of Array.isArray(input) ? input : [input]) {
     if (typeof part === 'string') {
-      parts.push({ text: part });
+      parts.push({ text: sanitizeToolOutput(part) });
     } else if (part) {
-      parts.push(part);
+      if ('text' in part && part.text !== undefined) {
+        parts.push({ ...part, text: sanitizeToolOutput(part.text as string) });
+      } else {
+        parts.push(part);
+      }
     }
   }
   return parts;
@@ -254,6 +280,18 @@ const createErrorResponse = (
   errorType,
   contentLength: error.message.length,
 });
+
+function buildReadFileNotFoundHint(args: Record<string, unknown>): string {
+  const absolutePath =
+    typeof args['absolute_path'] === 'string' ? args['absolute_path'] : '';
+  const baseName = absolutePath ? path.basename(absolutePath) : '';
+  const pattern = baseName ? `**/*${baseName}*` : '**/*';
+  return (
+    ' Подсказка: похоже, файл несколько раз не найден. Вместо перебора имен ' +
+    `используйте инструмент ${ToolNames.GLOB} для поиска (например, pattern="${pattern}"), ` +
+    `а затем вызовите ${ToolNames.READ_FILE} с точным путем.`
+  );
+}
 
 export async function truncateAndSaveToFile(
   content: string,
@@ -341,6 +379,8 @@ export class CoreToolScheduler {
   private chatRecordingService?: ChatRecordingService;
   private isFinalizingToolCalls = false;
   private isScheduling = false;
+  private readFileNotFoundCount = 0;
+  private lastPromptId: string | null = null;
   private requestQueue: Array<{
     request: ToolCallRequestInfo | ToolCallRequestInfo[];
     signal: AbortSignal;
@@ -357,6 +397,36 @@ export class CoreToolScheduler {
     this.getPreferredEditor = options.getPreferredEditor;
     this.onEditorClose = options.onEditorClose;
     this.chatRecordingService = options.chatRecordingService;
+  }
+
+  private resetReadFileNotFoundCountIfNeeded(promptId: string): void {
+    if (this.lastPromptId !== promptId) {
+      this.readFileNotFoundCount = 0;
+      this.lastPromptId = promptId;
+    }
+  }
+
+  private applyReadFileNotFoundHint(
+    request: ToolCallRequestInfo,
+    errorType: ToolErrorType | undefined,
+    errorMessage: string,
+  ): string {
+    this.resetReadFileNotFoundCountIfNeeded(request.prompt_id);
+
+    if (
+      request.name !== ToolNames.READ_FILE ||
+      errorType !== ToolErrorType.FILE_NOT_FOUND
+    ) {
+      this.readFileNotFoundCount = 0;
+      return errorMessage;
+    }
+
+    this.readFileNotFoundCount += 1;
+    if (this.readFileNotFoundCount < READ_FILE_NOT_FOUND_HINT_THRESHOLD) {
+      return errorMessage;
+    }
+
+    return `${errorMessage}${buildReadFileNotFoundHint(request.args)}`;
   }
 
   private setStatusInternal(
@@ -694,7 +764,7 @@ export class CoreToolScheduler {
 
             if (excludedMatch) {
               // The tool exists but is excluded - return permission error directly
-              const permissionErrorMessage = `Qwen Code requires permission to use ${excludedMatch}, but that permission was declined.`;
+              const permissionErrorMessage = `Gus Qwen requires permission to use ${excludedMatch}, but that permission was declined.`;
               return {
                 status: 'error',
                 request: reqInfo,
@@ -829,7 +899,7 @@ export class CoreToolScheduler {
               this.config.getInputFormat() !== InputFormat.STREAM_JSON;
 
             if (shouldAutoDeny) {
-              const errorMessage = `Qwen Code requires permission to use "${reqInfo.name}", but that permission was declined.`;
+              const errorMessage = `Gus Qwen requires permission to use "${reqInfo.name}", but that permission was declined.`;
               this.setStatusInternal(
                 reqInfo.callId,
                 'error',
@@ -1110,6 +1180,8 @@ export class CoreToolScheduler {
           }
 
           if (toolResult.error === undefined) {
+            this.resetReadFileNotFoundCountIfNeeded(scheduledCall.request.prompt_id);
+            this.readFileNotFoundCount = 0;
             let content = toolResult.llmContent;
             let outputFile: string | undefined = undefined;
             const contentLength =
@@ -1168,7 +1240,12 @@ export class CoreToolScheduler {
             this.setStatusInternal(callId, 'success', successResponse);
           } else {
             // It is a failure
-            const error = new Error(toolResult.error.message);
+            const adjustedErrorMessage = this.applyReadFileNotFoundHint(
+              scheduledCall.request,
+              toolResult.error.type,
+              toolResult.error.message,
+            );
+            const error = new Error(adjustedErrorMessage);
             const errorResponse = createErrorResponse(
               scheduledCall.request,
               error,

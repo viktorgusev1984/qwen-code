@@ -425,14 +425,31 @@ describe('EditTool', () => {
       const invocation = tool.build(params);
       const result = await invocation.execute(new AbortController().signal);
 
-      expect(result.llmContent).toMatch(
-        /Showing lines \d+-\d+ of \d+ from the edited file:/,
-      );
+      expect(result.llmContent).toMatch(/Successfully modified file/);
       expect(fs.readFileSync(filePath, 'utf8')).toBe(newContent);
       const display = result.returnDisplay as FileDiff;
       expect(display.fileDiff).toMatch(initialContent);
       expect(display.fileDiff).toMatch(newContent);
       expect(display.fileName).toBe(testFile);
+    });
+
+    it('should match even if old_string indentation is trimmed (loose fallback)', async () => {
+      const initialContent = '  line1\n  line2\n';
+      fs.writeFileSync(filePath, initialContent, 'utf8');
+      const params: EditToolParams = {
+        file_path: filePath,
+        old_string: 'line1\nline2\n',
+        new_string: '  line1\n  updated\n',
+      };
+
+      (mockConfig.getApprovalMode as Mock).mockReturnValueOnce(
+        ApprovalMode.AUTO_EDIT,
+      );
+      const invocation = tool.build(params);
+      const result = await invocation.execute(new AbortController().signal);
+
+      expect(result.error).toBeUndefined();
+      expect(fs.readFileSync(filePath, 'utf8')).toBe('  line1\n  updated\n');
     });
 
     it('should create a new file if old_string is empty and file does not exist, and return created message', async () => {
@@ -540,6 +557,20 @@ describe('EditTool', () => {
       });
     });
 
+    it('should return error if expected_replacements does not match actual occurrences', async () => {
+      fs.writeFileSync(filePath, 'old text old text', 'utf8');
+      const params: EditToolParams = {
+        file_path: filePath,
+        old_string: 'old',
+        new_string: 'new',
+      };
+      const invocation = tool.build(params);
+      const result = await invocation.execute(new AbortController().signal);
+      expect(result.error?.type).toBe(
+        ToolErrorType.EDIT_EXPECTED_OCCURRENCE_MISMATCH,
+      );
+    });
+
     it('should return error if trying to create a file that already exists (empty old_string)', async () => {
       fs.writeFileSync(filePath, 'Existing content', 'utf8');
       const params: EditToolParams = {
@@ -553,6 +584,38 @@ describe('EditTool', () => {
       expect(result.returnDisplay).toMatch(
         /Attempted to create a file that already exists/,
       );
+    });
+
+    it('should include modification message when proposed content is modified', async () => {
+      const initialContent = 'Line 1\nold line\nLine 3\nLine 4\nLine 5\n';
+      fs.writeFileSync(filePath, initialContent, 'utf8');
+      const params: EditToolParams = {
+        file_path: filePath,
+        old_string: 'old',
+        new_string: 'new',
+        modified_by_user: true,
+        ai_proposed_content: 'Line 1\nAI line\nLine 3\nLine 4\nLine 5\n',
+      };
+
+      (mockConfig.getApprovalMode as Mock).mockReturnValueOnce(
+        ApprovalMode.AUTO_EDIT,
+      );
+      const invocation = tool.build(params);
+      const result = await invocation.execute(new AbortController().signal);
+
+      expect(result.llmContent).toMatch(
+        /User modified the `new_string` content/,
+      );
+      expect((result.returnDisplay as FileDiff).diffStat).toStrictEqual({
+        model_added_lines: 1,
+        model_removed_lines: 1,
+        model_added_chars: 7,
+        model_removed_chars: 8,
+        user_added_lines: 1,
+        user_removed_lines: 1,
+        user_added_chars: 8,
+        user_removed_chars: 7,
+      });
     });
 
     it('should not include modification message when proposed content is not modified', async () => {
@@ -690,6 +753,36 @@ describe('EditTool', () => {
       expect(result.error?.type).toBe(
         ToolErrorType.EDIT_EXPECTED_OCCURRENCE_MISMATCH,
       );
+    });
+
+    it('should surface line contexts when multiple matches are found', async () => {
+      fs.writeFileSync(filePath, 'hit here\nkeep\nhit here\n', 'utf8');
+      const params: EditToolParams = {
+        file_path: filePath,
+        old_string: 'hit here',
+        new_string: 'replace',
+      };
+      const invocation = tool.build(params);
+      const result = await invocation.execute(new AbortController().signal);
+
+      expect(result.error?.type).toBe(
+        ToolErrorType.EDIT_EXPECTED_OCCURRENCE_MISMATCH,
+      );
+      expect(result.returnDisplay).toMatch(/Found matches at L1-3/);
+    });
+
+    it('should surface closest line hints when nothing matches exactly', async () => {
+      fs.writeFileSync(filePath, 'anchor line\nother\nanchor line again\n', 'utf8');
+      const params: EditToolParams = {
+        file_path: filePath,
+        old_string: 'anchor line\nmissing part\n',
+        new_string: 'new block',
+      };
+      const invocation = tool.build(params);
+      const result = await invocation.execute(new AbortController().signal);
+
+      expect(result.error?.type).toBe(ToolErrorType.EDIT_NO_OCCURRENCE_FOUND);
+      expect(result.returnDisplay).toMatch(/Closest matches by line/);
     });
 
     it('should return NO_CHANGE error', async () => {

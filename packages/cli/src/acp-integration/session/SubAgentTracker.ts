@@ -13,11 +13,11 @@ import type {
   ToolCallConfirmationDetails,
   AnyDeclarativeTool,
   AnyToolInvocation,
-} from '@qwen-code/qwen-code-core';
+} from '@psd-tech/gusqwen-core';
 import {
   SubAgentEventType,
   ToolConfirmationOutcome,
-} from '@qwen-code/qwen-code-core';
+} from '@psd-tech/gusqwen-core';
 import { z } from 'zod';
 import type { SessionContext } from './types.js';
 import { ToolCallEmitter } from './emitters/ToolCallEmitter.js';

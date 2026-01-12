@@ -26,7 +26,7 @@ import {
   type ResumedSessionData,
   type FileFilteringOptions,
   type MCPServerConfig,
-} from '@qwen-code/qwen-code-core';
+} from '@psd-tech/gusqwen-core';
 import { extensionsCommand } from '../commands/extensions.js';
 import type { Settings } from './settings.js';
 import yargs, { type Argv } from 'yargs';
@@ -93,6 +93,7 @@ function parseApprovalModeValue(value: string): ApprovalMode {
 export interface CliArgs {
   query: string | undefined;
   model: string | undefined;
+  streamingMode: 'stream' | 'sync' | undefined;
   sandbox: boolean | string | undefined;
   sandboxImage: string | undefined;
   debug: boolean | undefined;
@@ -167,7 +168,7 @@ export async function parseArguments(settings: Settings): Promise<CliArgs> {
     .locale('en')
     .scriptName('qwen')
     .usage(
-      'Usage: qwen [options] [command]\n\nQwen Code - Launch an interactive CLI, use -p/--prompt for non-interactive mode',
+      'Usage: qwen [options] [command]\n\nGus Qwen - Launch an interactive CLI, use -p/--prompt for non-interactive mode',
     )
     .option('telemetry', {
       type: 'boolean',
@@ -232,7 +233,7 @@ export async function parseArguments(settings: Settings): Promise<CliArgs> {
     })
     .option('proxy', {
       type: 'string',
-      description: 'Proxy for Qwen Code, like schema://user:password@host:port',
+      description: 'Proxy for Gus Qwen, like schema://user:password@host:port',
     })
     .deprecateOption(
       'proxy',
@@ -243,7 +244,7 @@ export async function parseArguments(settings: Settings): Promise<CliArgs> {
       description:
         'Enable chat recording to disk. If false, chat history is not saved and --continue/--resume will not work.',
     })
-    .command('$0 [query..]', 'Launch Qwen Code CLI', (yargsInstance: Argv) =>
+    .command('$0 [query..]', 'Launch Gus Qwen CLI', (yargsInstance: Argv) =>
       yargsInstance
         .positional('query', {
           description:
@@ -253,6 +254,12 @@ export async function parseArguments(settings: Settings): Promise<CliArgs> {
           alias: 'm',
           type: 'string',
           description: `Model`,
+        })
+        .option('streaming-mode', {
+          type: 'string',
+          choices: ['stream', 'sync'],
+          description:
+            'Select how responses are delivered: streaming (default) or synchronous.',
         })
         .option('prompt', {
           alias: 'p',
@@ -309,8 +316,8 @@ export async function parseArguments(settings: Settings): Promise<CliArgs> {
         })
         .option('channel', {
           type: 'string',
-          choices: ['VSCode', 'ACP', 'SDK', 'CI'],
-          description: 'Channel identifier (VSCode, ACP, SDK, CI)',
+          choices: ['VSCode', 'ACP', 'SDK', 'CI', 'JetBrains'],
+          description: 'Channel identifier (VSCode, ACP, SDK, CI, JetBrains)',
         })
         .option('allowed-mcp-server-names', {
           type: 'array',
@@ -1012,6 +1019,9 @@ export async function loadCliConfig(
     output: {
       format: outputSettingsFormat,
     },
+    streamingMode: (argv.streamingMode ??
+      settings.model?.streamingMode ??
+      'stream') as 'stream' | 'sync',
     channel: argv.channel,
     // Precedence: explicit CLI flag > settings file > default(true).
     // NOTE: do NOT set a yargs default for `chat-recording`, otherwise argv will

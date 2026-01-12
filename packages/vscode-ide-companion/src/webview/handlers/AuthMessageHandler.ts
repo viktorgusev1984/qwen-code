@@ -1,6 +1,6 @@
 /**
  * @license
- * Copyright 2025 Qwen Team
+ * Copyright 2025 Gus Qwen Team
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -62,9 +62,9 @@ export class AuthMessageHandler extends BaseMessageHandler {
         console.log('[AuthMessageHandler] Using fallback login method');
         // Fallback: show message and use command
         vscode.window.showInformationMessage(
-          'Please wait while we connect to Qwen Code...',
+          'Please wait while we connect to Gus Qwen...',
         );
-        await vscode.commands.executeCommand('qwen-code.login');
+        await vscode.commands.executeCommand('gusqwen.login');
       }
     } catch (error) {
       console.error('[AuthMessageHandler] Login failed:', error);

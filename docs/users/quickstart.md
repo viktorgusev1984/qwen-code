@@ -1,8 +1,8 @@
 # Quickstart
 
-> 👏 Welcome to Qwen Code!
+> 👏 Welcome to Gus Qwen!
 
-This quickstart guide will have you using AI-powered coding assistance in just a few minutes. By the end, you'll understand how to use Qwen Code for common development tasks.
+This quickstart guide will have you using AI-powered coding assistance in just a few minutes. By the end, you'll understand how to use Gus Qwen for common development tasks.
 
 ## Before you begin
 
@@ -10,11 +10,11 @@ Make sure you have:
 
 - A **terminal** or command prompt open
 - A code project to work with
-- A [Qwen Code](https://chat.qwen.ai/auth?mode=register) account
+- A [Gus Qwen](https://chat.gusqwen.ai/auth?mode=register) account
 
-## Step 1: Install Qwen Code
+## Step 1: Install Gus Qwen
 
-To install Qwen Code, use one of the following methods:
+To install Gus Qwen, use one of the following methods:
 
 ### NPM (recommended)
 
@@ -23,18 +23,18 @@ Requires [Node.js 20+](https://nodejs.org/download), you can use `node -v` check
 If you have [Node.js or newer installed](https://nodejs.org/en/download/):
 
 ```sh
-npm install -g @qwen-code/qwen-code@latest
+npm install -g @psd-tech/gusqwen@latest
 ```
 
 ### Homebrew (macOS, Linux)
 
 ```sh
-brew install qwen-code
+brew install gusqwen
 ```
 
 ## Step 2: Log in to your account
 
-Qwen Code requires an account to use. When you start an interactive session with the `qwen` command, you'll need to log in:
+Gus Qwen requires an account to use. When you start an interactive session with the `qwen` command, you'll need to log in:
 
 ```bash
 # You'll be prompted to log in on first use
@@ -46,19 +46,19 @@ qwen
 /auth
 ```
 
-Select `Qwen OAuth`, log in to your account and follow the prompts to confirm. Once logged in, your credentials are stored and you won't need to log in again.
+Select `Gus Qwen OAuth`, log in to your account and follow the prompts to confirm. Once logged in, your credentials are stored and you won't need to log in again.
 
 > [!note]
 >
-> When you first authenticate Qwen Code with your Qwen account, a workspace called ".qwen" is automatically created for you. This workspace provides centralized cost tracking and management for all Qwen Code usage in your organization.
+> When you first authenticate Gus Qwen with your Qwen account, a workspace called ".qwen" is automatically created for you. This workspace provides centralized cost tracking and management for all Gus Qwen usage in your organization.
 
 > [!tip]
 >
-> If you need to log in again or switch accounts, use the `/auth` command within Qwen Code.
+> If you need to log in again or switch accounts, use the `/auth` command within Gus Qwen.
 
 ## Step 3: Start your first session
 
-Open your terminal in any project directory and start Qwen Code:
+Open your terminal in any project directory and start Gus Qwen:
 
 ```bash
 # optiona
@@ -67,37 +67,37 @@ cd /path/to/your/project
 qwen
 ```
 
-You'll see the Qwen Code welcome screen with your session information, recent conversations, and latest updates. Type `/help` for available commands.
+You'll see the Gus Qwen welcome screen with your session information, recent conversations, and latest updates. Type `/help` for available commands.
 
-## Chat with Qwen Code
+## Chat with Gus Qwen
 
 ### Ask your first question
 
-Qwen Code will analyze your files and provide a summary. You can also ask more specific questions:
+Gus Qwen will analyze your files and provide a summary. You can also ask more specific questions:
 
 ```
 explain the folder structure
 ```
 
-You can also ask Qwen Code about its own capabilities:
+You can also ask Gus Qwen about its own capabilities:
 
 ```
-what can Qwen Code do?
+what can Gus Qwen do?
 ```
 
 > [!note]
 >
-> Qwen Code reads your files as needed - you don't have to manually add context. Qwen Code also has access to its own documentation and can answer questions about its features and capabilities.
+> Gus Qwen reads your files as needed - you don't have to manually add context. Gus Qwen also has access to its own documentation and can answer questions about its features and capabilities.
 
 ### Make your first code change
 
-Now let's make Qwen Code do some actual coding. Try a simple task:
+Now let's make Gus Qwen do some actual coding. Try a simple task:
 
 ```
 add a hello world function to the main file
 ```
 
-Qwen Code will:
+Gus Qwen will:
 
 1. Find the appropriate file
 2. Show you the proposed changes
@@ -106,11 +106,11 @@ Qwen Code will:
 
 > [!note]
 >
-> Qwen Code always asks for permission before modifying files. You can approve individual changes or enable "Accept all" mode for a session.
+> Gus Qwen always asks for permission before modifying files. You can approve individual changes or enable "Accept all" mode for a session.
 
-### Use Git with Qwen Code
+### Use Git with Gus Qwen
 
-Qwen Code makes Git operations conversational:
+Gus Qwen makes Git operations conversational:
 
 ```
 what files have I changed?
@@ -136,7 +136,7 @@ help me resolve merge conflicts
 
 ### Fix a bug or add a feature
 
-Qwen Code is proficient at debugging and feature implementation.
+Gus Qwen is proficient at debugging and feature implementation.
 
 Describe what you want in natural language:
 
@@ -150,7 +150,7 @@ Or fix existing issues:
 there's a bug where users can submit empty forms - fix it
 ```
 
-Qwen Code will:
+Gus Qwen will:
 
 - Locate the relevant code
 - Understand the context
@@ -187,7 +187,7 @@ review my changes and suggest improvements
 
 > [!tip]
 >
-> **Remember**: Qwen Code is your AI pair programmer. Talk to it like you would a helpful colleague - describe what you want to achieve, and it will help you get there.
+> **Remember**: Gus Qwen is your AI pair programmer. Talk to it like you would a helpful colleague - describe what you want to achieve, and it will help you get there.
 
 ## Essential commands
 
@@ -195,16 +195,16 @@ Here are the most important commands for daily use:
 
 | Command               | What it does                                     | Example                       |
 | --------------------- | ------------------------------------------------ | ----------------------------- |
-| `qwen`                | start Qwen Code                                  | `qwen`                        |
+| `qwen`                | start Gus Qwen                                  | `qwen`                        |
 | `/auth`               | Change authentication method                     | `/auth`                       |
 | `/help`               | Display help information for available commands  | `/help` or `/?`               |
 | `/compress`           | Replace chat history with summary to save Tokens | `/compress`                   |
 | `/clear`              | Clear terminal screen content                    | `/clear` (shortcut: `Ctrl+L`) |
-| `/theme`              | Change Qwen Code visual theme                    | `/theme`                      |
+| `/theme`              | Change Gus Qwen visual theme                    | `/theme`                      |
 | `/language`           | View or change language settings                 | `/language`                   |
 | → `ui [language]`     | Set UI interface language                        | `/language ui zh-CN`          |
 | → `output [language]` | Set LLM output language                          | `/language output Chinese`    |
-| `/quit`               | Exit Qwen Code immediately                       | `/quit` or `/exit`            |
+| `/quit`               | Exit Gus Qwen immediately                       | `/quit` or `/exit`            |
 
 See the [CLI reference](./features/commands) for a complete list of commands.
 
@@ -225,9 +225,9 @@ See the [CLI reference](./features/commands) for a complete list of commands.
 3. build a webpage that allows users to see and edit their information
 ```
 
-**Let Qwen Code explore first**
+**Let Gus Qwen explore first**
 
-- Before making changes, let Qwen Code understand your code:
+- Before making changes, let Gus Qwen understand your code:
 
 ```
 analyze the database schema
@@ -246,6 +246,6 @@ build a dashboard showing products that are most frequently returned by our UK c
 
 ## Getting help
 
-- **In Qwen Code**: Type `/help` or ask "how do I..."
+- **In Gus Qwen**: Type `/help` or ask "how do I..."
 - **Documentation**: You're here! Browse other guides
-- **Community**: Join our [GitHub Discussion](https://github.com/QwenLM/qwen-code/discussions) for tips and support
+- **Community**: Join our [GitHub Discussion](https://github.com/GusQwen/gusqwen/discussions) for tips and support

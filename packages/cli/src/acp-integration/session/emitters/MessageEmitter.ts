@@ -73,6 +73,36 @@ export class MessageEmitter extends BaseEmitter {
   }
 
   /**
+   * Emits a chat compression update.
+   */
+  async emitChatCompression(params: {
+    originalTokenCount: number;
+    newTokenCount: number;
+    trigger: 'auto' | 'manual';
+  }): Promise<void> {
+    await this.sendUpdate({
+      sessionUpdate: 'chat_compression',
+      originalTokenCount: params.originalTokenCount,
+      newTokenCount: params.newTokenCount,
+      trigger: params.trigger,
+    });
+  }
+
+  /**
+   * Emits a confirm action update.
+   */
+  async emitConfirmAction(params: {
+    prompt: string;
+    originalInvocation: { raw: string };
+  }): Promise<void> {
+    await this.sendUpdate({
+      sessionUpdate: 'confirm_action',
+      prompt: params.prompt,
+      originalInvocation: params.originalInvocation,
+    });
+  }
+
+  /**
    * Emits a message chunk based on role and thought flag.
    * This is the unified method that handles all message types.
    *

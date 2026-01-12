@@ -1,6 +1,6 @@
 /**
  * @license
- * Copyright 2025 Qwen Team
+ * Copyright 2025 Gus Qwen Team
  * SPDX-License-Identifier: Apache-2.0
  *
  * Edit tool call component - specialized for file editing operations
@@ -100,6 +100,12 @@ export const EditToolCall: React.FC<BaseToolCallProps> = ({ toolCall }) => {
           <div className="inline-flex text-[var(--app-secondary-foreground)] text-[0.85em] opacity-70 flex-row items-start w-full gap-1 flex items-center">
             <span className="flex-shrink-0 w-full">edit failed</span>
           </div>
+          {errors.length > 0 && (
+            <div className="inline-flex text-[var(--app-secondary-foreground)] text-[0.85em] opacity-70 flex-row items-start w-full gap-1">
+              <span className="flex-shrink-0 relative top-[-0.1em]">⎿</span>
+              <span className="flex-shrink-0 w-full">{errors.join('\n')}</span>
+            </div>
+          )}
         </div>
       </div>
     );

@@ -1,18 +1,18 @@
 export default {
-  'Contribute to Qwen Code': {
-    title: 'Contribute to Qwen Code',
+  'Contribute to Gus Qwen': {
+    title: 'Contribute to Gus Qwen',
     type: 'separator',
   },
   architecture: 'Architecture',
   roadmap: 'Roadmap',
   contributing: 'Contributing Guide',
-  'Qwen Code SDK': {
+  'Gus Qwen SDK': {
     title: 'Agent SDK',
     type: 'separator',
   },
   'sdk-typescript': 'Typescript SDK',
-  'Dive Into Qwen Code': {
-    title: 'Dive Into Qwen Code',
+  'Dive Into Gus Qwen': {
+    title: 'Dive Into Gus Qwen',
     type: 'separator',
   },
 

@@ -105,7 +105,7 @@ export class McpClient {
     private readonly sendSdkMcpMessage?: SendSdkMcpMessage,
   ) {
     this.client = new Client({
-      name: `qwen-cli-mcp-client-${this.serverName}`,
+      name: `gusqwen-cli-mcp-client-${this.serverName}`,
       version: '0.0.1',
     });
   }
@@ -775,7 +775,7 @@ export async function connectToMcpServer(
   sendSdkMcpMessage?: SendSdkMcpMessage,
 ): Promise<Client> {
   const mcpClient = new Client({
-    name: 'qwen-code-mcp-client',
+    name: 'gusqwen-mcp-client',
     version: '0.0.1',
   });
 

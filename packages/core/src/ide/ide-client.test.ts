@@ -70,6 +70,7 @@ describe('IdeClient', () => {
     });
     vi.mocked(os.tmpdir).mockReturnValue('/tmp');
     vi.mocked(os.homedir).mockReturnValue('/home/test');
+    vi.mocked(fs.promises.readdir).mockResolvedValue([]);
 
     // Mock MCP client and transports
     mockClient = {
@@ -178,6 +179,39 @@ describe('IdeClient', () => {
         expect.any(Object),
       );
       expect(mockClient.connect).toHaveBeenCalledWith(mockHttpTransport);
+      expect(ideClient.getConnectionStatus().status).toBe(
+        IDEConnectionStatus.Connected,
+      );
+    });
+
+    it('should connect using the newest lock file when no port env is set', async () => {
+      delete process.env['QWEN_CODE_IDE_SERVER_PORT'];
+      const oldConfig = { port: '1111', workspacePath: '/test/workspace' };
+      const newConfig = { port: '2222', workspacePath: '/test/workspace' };
+
+      (
+        vi.mocked(fs.promises.readdir) as Mock<
+          (path: fs.PathLike) => Promise<string[]>
+        >
+      ).mockResolvedValue(['1111.lock', '2222.lock']);
+      (
+        vi.mocked(fs.promises.stat) as Mock<
+          (path: fs.PathLike) => Promise<fs.Stats>
+        >
+      )
+        .mockResolvedValueOnce({ mtimeMs: 100 } as fs.Stats)
+        .mockResolvedValueOnce({ mtimeMs: 200 } as fs.Stats);
+      vi.mocked(fs.promises.readFile)
+        .mockResolvedValueOnce(JSON.stringify(oldConfig))
+        .mockResolvedValueOnce(JSON.stringify(newConfig));
+
+      const ideClient = await IdeClient.getInstance();
+      await ideClient.connect();
+
+      expect(StreamableHTTPClientTransport).toHaveBeenCalledWith(
+        new URL('http://127.0.0.1:2222/mcp'),
+        expect.any(Object),
+      );
       expect(ideClient.getConnectionStatus().status).toBe(
         IDEConnectionStatus.Connected,
       );
@@ -309,7 +343,7 @@ describe('IdeClient', () => {
 
       expect(result).toEqual(config);
       expect(fs.promises.readFile).toHaveBeenCalledWith(
-        path.join('/tmp', 'qwen-code-ide-server-12345.json'),
+        path.join('/tmp', 'gusqwen-ide-server-12345.json'),
         'utf8',
       );
     });
@@ -331,11 +365,11 @@ describe('IdeClient', () => {
 
       expect(result).toEqual(config2);
       expect(fs.promises.readFile).toHaveBeenCalledWith(
-        path.join('/tmp', 'qwen-code-ide-server-12345.json'),
+        path.join('/tmp', 'gusqwen-ide-server-12345.json'),
         'utf8',
       );
       expect(fs.promises.readFile).toHaveBeenCalledWith(
-        path.join('/tmp', 'qwen-code-ide-server-2222.json'),
+        path.join('/tmp', 'gusqwen-ide-server-2222.json'),
         'utf8',
       );
       delete process.env['QWEN_CODE_IDE_SERVER_PORT'];

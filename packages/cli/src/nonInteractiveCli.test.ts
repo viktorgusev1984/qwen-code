@@ -9,7 +9,7 @@ import type {
   ToolRegistry,
   ServerGeminiStreamEvent,
   SessionMetrics,
-} from '@qwen-code/qwen-code-core';
+} from '@psd-tech/gusqwen-core';
 import type { CLIUserMessage } from './nonInteractive/types.js';
 import {
   executeToolCall,
@@ -20,7 +20,7 @@ import {
   uiTelemetryService,
   FatalInputError,
   ApprovalMode,
-} from '@qwen-code/qwen-code-core';
+} from '@psd-tech/gusqwen-core';
 import type { Part } from '@google/genai';
 import { runNonInteractive } from './nonInteractiveCli.js';
 import { vi, type Mock, type MockInstance } from 'vitest';
@@ -29,9 +29,9 @@ import { CommandKind } from './ui/commands/types.js';
 
 // Mock core modules
 vi.mock('./ui/hooks/atCommandProcessor.js');
-vi.mock('@qwen-code/qwen-code-core', async (importOriginal) => {
+vi.mock('@psd-tech/gusqwen-core', async (importOriginal) => {
   const original =
-    await importOriginal<typeof import('@qwen-code/qwen-code-core')>();
+    await importOriginal<typeof import('@psd-tech/gusqwen-core')>();
 
   class MockChatRecordingService {
     initialize = vi.fn();

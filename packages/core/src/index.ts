@@ -53,10 +53,13 @@ export * from './utils/subagentGenerator.js';
 export * from './utils/projectSummary.js';
 export * from './utils/promptIdContext.js';
 export * from './utils/thoughtUtils.js';
+export * from './utils/thoughtStreamParser.js';
+export * from './utils/toolCallParser.js';
 
 // Export services
 export * from './services/fileDiscoveryService.js';
 export * from './services/gitService.js';
+export * from './services/chatCompressionService.js';
 export * from './services/chatRecordingService.js';
 export * from './services/sessionService.js';
 export * from './services/fileSystemService.js';
@@ -76,6 +79,7 @@ export * from './services/shellExecutionService.js';
 export * from './tools/tools.js';
 export * from './tools/tool-error.js';
 export * from './tools/tool-registry.js';
+export * from './tools/tool-names.js';
 
 // Export subagents (Phase 1)
 export * from './subagents/index.js';

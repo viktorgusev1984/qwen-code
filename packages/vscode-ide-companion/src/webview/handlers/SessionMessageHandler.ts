@@ -1,6 +1,6 @@
 /**
  * @license
- * Copyright 2025 Qwen Team
+ * Copyright 2025 Gus Qwen Team
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -96,7 +96,7 @@ export class SessionMessageHandler extends BaseMessageHandler {
         // This does not alter the current conversation in this tab; the new tab
         // will initialize its own state and (optionally) create a new session.
         try {
-          await vscode.commands.executeCommand('qwenCode.openNewChatTab');
+          await vscode.commands.executeCommand('gusqwen.openNewChatTab');
         } catch (error) {
           console.error(
             '[SessionMessageHandler] Failed to open new chat tab:',
@@ -180,7 +180,7 @@ export class SessionMessageHandler extends BaseMessageHandler {
       if (this.loginHandler) {
         await this.loginHandler();
       } else {
-        await vscode.commands.executeCommand('qwen-code.login');
+        await vscode.commands.executeCommand('gusqwen.login');
       }
       return true;
     }
@@ -204,7 +204,7 @@ export class SessionMessageHandler extends BaseMessageHandler {
       if (this.loginHandler) {
         await this.loginHandler();
       } else {
-        await vscode.commands.executeCommand('qwen-code.login');
+        await vscode.commands.executeCommand('gusqwen.login');
       }
       return 'login';
     }
@@ -336,7 +336,7 @@ export class SessionMessageHandler extends BaseMessageHandler {
       console.warn('[SessionMessageHandler] Agent not connected');
 
       // Show non-modal notification with Login button
-      await this.promptLogin('You need to login first to use Qwen Code.');
+      await this.promptLogin('You need to login first to use Gus Qwen.');
       return;
     }
 
@@ -358,7 +358,7 @@ export class SessionMessageHandler extends BaseMessageHandler {
           errorMsg.includes('(code: -32000)')
         ) {
           await this.promptLogin(
-            'Your login session has expired or is invalid. Please login again to continue using Qwen Code.',
+            'Your login session has expired or is invalid. Please login again to continue using Gus Qwen.',
           );
           return;
         }
@@ -427,7 +427,7 @@ export class SessionMessageHandler extends BaseMessageHandler {
       ) {
         // Show a more user-friendly error message for expired sessions
         await this.promptLogin(
-          'Your login session has expired or is invalid. Please login again to continue using Qwen Code.',
+          'Your login session has expired or is invalid. Please login again to continue using Gus Qwen.',
         );
 
         // Send a specific error to the webview for better UI handling

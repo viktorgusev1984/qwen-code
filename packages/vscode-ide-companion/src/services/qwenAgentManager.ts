@@ -1,8 +1,10 @@
 /**
  * @license
- * Copyright 2025 Qwen Team
+ * Copyright 2025 Gus Qwen Team
  * SPDX-License-Identifier: Apache-2.0
  */
+
+import type { AvailableCommand } from '../../../cli/src/acp-integration/schema.js';
 import { AcpConnection } from './acpConnection.js';
 import type {
   AcpSessionUpdate,
@@ -1209,6 +1211,37 @@ export class QwenAgentManager {
   }
 
   /**
+   * Register compression notification callback
+   *
+   * @param callback - Compression callback function
+   */
+  onCompression(
+    callback: (info: {
+      originalTokenCount: number;
+      newTokenCount: number;
+      trigger: 'auto' | 'manual';
+    }) => void,
+  ): void {
+    this.callbacks.onCompression = callback;
+    this.sessionUpdateHandler.updateCallbacks(this.callbacks);
+  }
+
+  /**
+   * Register confirm action callback
+   *
+   * @param callback - Confirm action callback function
+   */
+  onConfirmAction(
+    callback: (notice: {
+      prompt: string;
+      originalInvocation: { raw: string };
+    }) => void,
+  ): void {
+    this.callbacks.onConfirmAction = callback;
+    this.sessionUpdateHandler.updateCallbacks(this.callbacks);
+  }
+
+  /**
    * Register permission request callback
    *
    * @param callback - Permission request callback function
@@ -1254,6 +1287,14 @@ export class QwenAgentManager {
     callback: (modeId: 'plan' | 'default' | 'auto-edit' | 'yolo') => void,
   ): void {
     this.callbacks.onModeChanged = callback;
+    this.sessionUpdateHandler.updateCallbacks(this.callbacks);
+  }
+
+  /**
+   * Register available commands callback
+   */
+  onAvailableCommands(callback: (commands: AvailableCommand[]) => void): void {
+    this.callbacks.onAvailableCommands = callback;
     this.sessionUpdateHandler.updateCallbacks(this.callbacks);
   }
 

@@ -1,6 +1,6 @@
 /**
  * @license
- * Copyright 2025 Qwen Team
+ * Copyright 2025 Gus Qwen Team
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -174,7 +174,7 @@ export const InputForm: React.FC<InputFormProps> = ({
               role="textbox"
               aria-label="Message input"
               aria-multiline="true"
-              data-placeholder="Ask Qwen Code …"
+              data-placeholder="Ask Gus Qwen …"
               // Use a data flag so CSS can show placeholder even if the browser
               // inserts an invisible <br> into contentEditable (so :empty no longer matches)
               data-empty={
@@ -220,8 +220,8 @@ export const InputForm: React.FC<InputFormProps> = ({
                       : `Active file will NOT be auto-loaded into context: ${activeFileName}`;
                   }
                   return selectedLinesText
-                    ? `Showing Qwen Code your current selection: ${selectedLinesText}`
-                    : `Showing Qwen Code your current file: ${activeFileName}`;
+                    ? `Showing Gus Qwen your current selection: ${selectedLinesText}`
+                    : `Showing Gus Qwen your current file: ${activeFileName}`;
                 })()}
                 onClick={onToggleSkipAutoActiveContext}
               >

@@ -1,6 +1,6 @@
 /**
  * @license
- * Copyright 2025 Qwen Team
+ * Copyright 2025 Gus Qwen Team
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -42,7 +42,7 @@ import {
 } from './components/messages/index.js';
 import { InputForm } from './components/layout/InputForm.js';
 import { SessionSelector } from './components/layout/SessionSelector.js';
-import { FileIcon, UserIcon } from './components/icons/index.js';
+import { FileIcon, FolderIcon, UserIcon } from './components/icons/index.js';
 import { ApprovalMode, NEXT_APPROVAL_MODE } from '../types/acpTypes.js';
 import type { ApprovalModeValue } from '../types/approvalModeValueTypes.js';
 import type { PlanEntry } from '../types/chatTypes.js';
@@ -67,9 +67,16 @@ export const App: React.FC = () => {
     options: PermissionOption[];
     toolCall: PermissionToolCall;
   } | null>(null);
+  const [confirmActionRequest, setConfirmActionRequest] = useState<{
+    prompt: string;
+    raw: string;
+  } | null>(null);
   const [planEntries, setPlanEntries] = useState<PlanEntry[]>([]);
   const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true); // Track if we're still initializing/loading
+  const [availableCommands, setAvailableCommands] = useState<
+    Array<Record<string, unknown>>
+  >([]);
   const messagesEndRef = useRef<HTMLDivElement>(
     null,
   ) as React.RefObject<HTMLDivElement>;
@@ -90,6 +97,17 @@ export const App: React.FC = () => {
   const [skipAutoActiveContext, setSkipAutoActiveContext] = useState(false);
 
   // Completion system
+  const normalizeFileQuery = React.useCallback(
+    (raw: string) =>
+      raw.trim().replace(/^@/, '').replace(/\\/g, '/').toLowerCase(),
+    [],
+  );
+
+  const normalizeMatchText = React.useCallback(
+    (raw: string) => raw.replace(/\\/g, '/').toLowerCase(),
+    [],
+  );
+
   const getCompletionItems = React.useCallback(
     async (trigger: '@' | '/', query: string): Promise<CompletionItem[]> => {
       if (trigger === '@') {
@@ -102,26 +120,47 @@ export const App: React.FC = () => {
         fileContext.requestWorkspaceFiles(query);
 
         const fileIcon = <FileIcon />;
+        const folderIcon = <FolderIcon />;
         const allItems: CompletionItem[] = fileContext.workspaceFiles.map(
-          (file) => ({
-            id: file.id,
-            label: file.label,
-            description: file.description,
-            type: 'file' as const,
-            icon: fileIcon,
-            // Insert filename after @, keep path for mapping
-            value: file.label,
-            path: file.path,
-          }),
+          (file) => {
+            const isFolder = file.type === 'folder';
+            const displayPath = file.description ?? file.label;
+            return {
+              id: file.id,
+              label: displayPath,
+              description: file.description ? file.label : undefined,
+              type: isFolder ? ('folder' as const) : ('file' as const),
+              icon: isFolder ? folderIcon : fileIcon,
+              // Insert the same path shown in the dropdown (relative path if available).
+              value: displayPath,
+              path: file.path,
+            };
+          },
         );
 
         if (query && query.length >= 1) {
-          const lowerQuery = query.toLowerCase();
+          const normalizedQuery = normalizeFileQuery(query);
+          if (!normalizedQuery) {
+            return allItems;
+          }
+          const hasTrailingSlash = normalizedQuery.endsWith('/');
+          const normalizedQueryNoSlash = hasTrailingSlash
+            ? normalizedQuery.slice(0, -1)
+            : normalizedQuery;
+          const matches = (value: string) => {
+            const normalizedValue = normalizeMatchText(value);
+            if (
+              hasTrailingSlash &&
+              normalizedValue === normalizedQueryNoSlash
+            ) {
+              return true;
+            }
+            return normalizedValue.includes(normalizedQuery);
+          };
           return allItems.filter(
             (item) =>
-              item.label.toLowerCase().includes(lowerQuery) ||
-              (item.description &&
-                item.description.toLowerCase().includes(lowerQuery)),
+              matches(item.label) ||
+              (item.description ? matches(item.description) : false),
           );
         }
 
@@ -140,24 +179,104 @@ export const App: React.FC = () => {
         return allItems;
       } else {
         // Handle slash commands
-        const commands: CompletionItem[] = [
-          {
-            id: 'login',
-            label: '/login',
-            description: 'Login to Qwen Code',
-            type: 'command',
-            icon: <UserIcon />,
-          },
-        ];
+        const userIcon = <UserIcon />;
 
-        return commands.filter((cmd) =>
-          cmd.label.toLowerCase().includes(query.toLowerCase()),
+        const getSubcommands = (cmd: Record<string, unknown>) =>
+          (cmd.subcommands ??
+            (cmd as { subCommands?: Array<Record<string, unknown>> })
+              .subCommands ??
+            []) as Array<Record<string, unknown>>;
+
+        const makeItem = (
+          label: string,
+          description: string | undefined,
+          value: string,
+        ): CompletionItem => ({
+          id: `/${value}`,
+          label,
+          description,
+          type: 'command' as const,
+          icon: userIcon,
+          value,
+        });
+
+        const rawQuery = query ?? '';
+        const trimmedQuery = rawQuery.trim();
+        const endsWithSpace = /\s$/.test(rawQuery);
+
+        if (!trimmedQuery) {
+          return availableCommands.map((cmd) =>
+            makeItem(
+              `/${cmd.name as string}`,
+              cmd.description as string,
+              cmd.name as string,
+            ),
+          );
+        }
+
+        const parts = trimmedQuery.split(/\s+/);
+        const exactTokens = endsWithSpace ? parts : parts.slice(0, -1);
+        let currentCommands = availableCommands;
+        const pathTokens: string[] = [];
+
+        for (const token of exactTokens) {
+          const match = currentCommands.find(
+            (cmd) => (cmd.name as string).toLowerCase() === token.toLowerCase(),
+          );
+          if (!match) {
+            return [];
+          }
+          pathTokens.push(match.name as string);
+          currentCommands = getSubcommands(match);
+        }
+
+        const buildItems = (
+          commands: Array<Record<string, unknown>>,
+          prefixTokens: string[],
+          filterPrefix?: string,
+        ): CompletionItem[] => {
+          const isTopLevel = prefixTokens.length === 0;
+          return commands
+            .filter((cmd) => {
+              if (!filterPrefix) {
+                return true;
+              }
+              return (cmd.name as string)
+                .toLowerCase()
+                .startsWith(filterPrefix.toLowerCase());
+            })
+            .map((cmd) => {
+              const name = cmd.name as string;
+              const label = isTopLevel ? `/${name}` : name;
+              const value = [...prefixTokens, name].join(' ');
+              return makeItem(label, cmd.description as string, value);
+            });
+        };
+
+        if (endsWithSpace) {
+          return buildItems(currentCommands, pathTokens);
+        }
+
+        const lastToken = parts[parts.length - 1] ?? '';
+        const exactMatch = currentCommands.find(
+          (cmd) =>
+            (cmd.name as string).toLowerCase() === lastToken.toLowerCase(),
         );
+        if (exactMatch) {
+          const subcommands = getSubcommands(exactMatch);
+          if (subcommands.length > 0) {
+            return buildItems(subcommands, [
+              ...pathTokens,
+              exactMatch.name as string,
+            ]);
+          }
+        }
+
+        return buildItems(currentCommands, pathTokens, lastToken);
       }
     },
-    [fileContext],
+    [fileContext, availableCommands, normalizeFileQuery, normalizeMatchText],
   );
-
   const completion = useCompletionTrigger(inputFieldRef, getCompletionItems);
 
   // Track a lightweight signature of workspace files to detect content changes even when length is unchanged
@@ -244,10 +363,12 @@ export const App: React.FC = () => {
     clearToolCalls,
     setPlanEntries,
     handlePermissionRequest: setPermissionRequest,
+    handleConfirmActionRequest: setConfirmActionRequest,
     inputFieldRef,
     setInputText,
     setEditMode,
     setIsAuthenticated,
+    setAvailableCommands,
   });
 
   // Auto-scroll handling: keep the view pinned to bottom when new content arrives,
@@ -383,7 +504,53 @@ export const App: React.FC = () => {
     [vscode],
   );
 
+  const confirmActionOptions = useMemo<PermissionOption[]>(
+    () => [
+      { name: 'Confirm', kind: 'proceed', optionId: 'confirm' },
+      { name: 'Cancel', kind: 'reject', optionId: 'cancel' },
+    ],
+    [],
+  );
+
+  const handleConfirmActionResponse = useCallback(
+    (optionId: string) => {
+      const request = confirmActionRequest;
+      setConfirmActionRequest(null);
+      if (!request) {
+        return;
+      }
+      if (optionId === 'confirm' && request.raw) {
+        vscode.postMessage({
+          type: 'sendMessage',
+          data: { text: request.raw },
+        });
+      } else {
+        messageHandling.addMessage({
+          role: 'assistant',
+          content: 'Operation cancelled.',
+          timestamp: Date.now(),
+        });
+      }
+    },
+    [confirmActionRequest, messageHandling, vscode],
+  );
+
   // Handle completion selection
+  // When user sends a message after scrolling up, re-pin and jump to the bottom
+  const submitHandler = (e: React.FormEvent) => {
+    setPinnedToBottom(true);
+
+    const container = messagesContainerRef.current;
+    if (container) {
+      const top = container.scrollHeight - container.clientHeight;
+      container.scrollTo({ top });
+    }
+
+    submitMessage(e);
+  };
+
+  const handleSubmitWithScroll = useCallback(submitHandler, [submitMessage]);
+
   const handleCompletionSelect = useCallback(
     (item: CompletionItem) => {
       // Handle completion selection by inserting the value into the input field
@@ -398,14 +565,85 @@ export const App: React.FC = () => {
         return;
       }
 
-      // Slash commands can execute immediately
+      // Slash commands
       if (item.type === 'command') {
         const command = (item.label || '').trim();
+        // Special case for /login: execute immediately
         if (command === '/login') {
           vscode.postMessage({ type: 'login', data: {} });
           completion.closeCompletion();
           return;
         }
+        const getSubcommands = (cmd: Record<string, unknown>) =>
+          (cmd.subcommands ??
+            (cmd as { subCommands?: Array<Record<string, unknown>> })
+              .subCommands ??
+            []) as Array<Record<string, unknown>>;
+
+        const findCommandByTokens = (
+          commands: Array<Record<string, unknown>>,
+          tokens: string[],
+        ): Record<string, unknown> | null => {
+          let currentCommands = commands;
+          let current: Record<string, unknown> | null = null;
+
+          for (const token of tokens) {
+            const match =
+              currentCommands.find(
+                (cmd) =>
+                  (cmd.name as string).toLowerCase() === token.toLowerCase(),
+              ) || null;
+            if (!match) {
+              return null;
+            }
+            current = match;
+            currentCommands = getSubcommands(match);
+          }
+
+          return current;
+        };
+
+        const getCompletionPosition = (
+          element: HTMLDivElement,
+        ): { top: number; left: number } => {
+          const selection = window.getSelection();
+          if (selection && selection.rangeCount > 0) {
+            const rect = selection.getRangeAt(0).getBoundingClientRect();
+            if (rect.top > 0 && rect.left > 0) {
+              return { top: rect.top, left: rect.left };
+            }
+          }
+          const inputRect = element.getBoundingClientRect();
+          return { top: inputRect.top, left: inputRect.left };
+        };
+
+        // For other commands, insert into the input field
+        const commandLabel =
+          typeof item.value === 'string' ? item.value : String(item.label);
+        const commandName = commandLabel.startsWith('/')
+          ? commandLabel.substring(1)
+          : commandLabel;
+        const tokens = commandName.split(/\s+/).filter(Boolean);
+        const matchedCommand = findCommandByTokens(availableCommands, tokens);
+        const hasSubcommands =
+          matchedCommand && getSubcommands(matchedCommand).length > 0;
+        const newText = `/${commandName} `;
+        inputElement.textContent = newText;
+        setInputText(newText);
+        // Move caret to the end
+        const newRange = document.createRange();
+        const sel = window.getSelection();
+        newRange.selectNodeContents(inputElement);
+        newRange.collapse(false);
+        sel?.removeAllRanges();
+        sel?.addRange(newRange);
+        if (hasSubcommands) {
+          const position = getCompletionPosition(inputElement);
+          void completion.openCompletion('/', `${commandName} `, position);
+        } else {
+          completion.closeCompletion();
+        }
+        return;
       }
 
       // If selecting a file, add @filename -> fullpath mapping
@@ -490,7 +728,14 @@ export const App: React.FC = () => {
       // Close the completion menu
       completion.closeCompletion();
     },
-    [completion, inputFieldRef, setInputText, fileContext, vscode],
+    [
+      availableCommands,
+      completion,
+      inputFieldRef,
+      setInputText,
+      fileContext,
+      vscode,
+    ],
   );
 
   // Handle attach context click
@@ -524,22 +769,6 @@ export const App: React.FC = () => {
   const handleToggleThinking = () => {
     setThinkingEnabled((prev) => !prev);
   };
-
-  // When user sends a message after scrolling up, re-pin and jump to the bottom
-  const handleSubmitWithScroll = useCallback(
-    (e: React.FormEvent) => {
-      setPinnedToBottom(true);
-
-      const container = messagesContainerRef.current;
-      if (container) {
-        const top = container.scrollHeight - container.clientHeight;
-        container.scrollTo({ top });
-      }
-
-      submitMessage(e);
-    },
-    [submitMessage],
-  );
 
   // Create unified message array containing all types of messages and tool calls
   const allMessages = useMemo<
@@ -682,7 +911,7 @@ export const App: React.FC = () => {
           <div className="text-center">
             <div className="border-primary mx-auto mb-2 h-8 w-8 animate-spin rounded-full border-b-2"></div>
             <p className="text-muted-foreground text-sm">
-              Preparing Qwen Code...
+              Preparing Gus Qwen...
             </p>
           </div>
         </div>
@@ -720,7 +949,7 @@ export const App: React.FC = () => {
               onLogin={() => {
                 vscode.postMessage({ type: 'login', data: {} });
                 messageHandling.setWaitingForResponse(
-                  'Logging in to Qwen Code...',
+                  'Logging in to Gus Qwen...',
                 );
               }}
             />
@@ -815,7 +1044,20 @@ export const App: React.FC = () => {
         />
       )}
 
-      {isAuthenticated && permissionRequest && (
+      {confirmActionRequest && !permissionRequest && (
+        <PermissionDrawer
+          isOpen={!!confirmActionRequest}
+          options={confirmActionOptions}
+          toolCall={{
+            title: confirmActionRequest.prompt,
+            kind: 'confirm_action',
+          }}
+          onResponse={handleConfirmActionResponse}
+          onClose={() => setConfirmActionRequest(null)}
+        />
+      )}
+
+      {permissionRequest && (
         <PermissionDrawer
           isOpen={!!permissionRequest}
           options={permissionRequest.options}

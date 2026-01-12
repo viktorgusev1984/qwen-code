@@ -27,7 +27,7 @@ import { useConfig } from '../contexts/ConfigContext.js';
 import { useSettings } from '../contexts/SettingsContext.js';
 import { SettingScope } from '../../config/settings.js';
 import { AuthState } from '../types.js';
-import { AuthType } from '@qwen-code/qwen-code-core';
+import { AuthType } from '@psd-tech/gusqwen-core';
 import process from 'node:process';
 import { type UseHistoryManagerReturn } from '../hooks/useHistoryManager.js';
 import { IdeTrustChangeDialog } from './IdeTrustChangeDialog.js';
@@ -226,7 +226,7 @@ export const DialogManager = ({
           authStatus={uiState.qwenAuthState.authStatus}
           authMessage={uiState.qwenAuthState.authMessage}
           onTimeout={() => {
-            uiActions.onAuthError('Qwen OAuth authentication timed out.');
+            uiActions.onAuthError('Gus Qwen OAuth authentication timed out.');
             uiActions.cancelAuthentication();
             uiActions.setAuthState(AuthState.Updating);
           }}

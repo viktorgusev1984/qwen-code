@@ -299,6 +299,31 @@ export interface ProcessedFileReadResult {
   linesShown?: [number, number]; // For text files [startLine, endLine] (1-based for display)
 }
 
+function buildMissingFileHint(
+  filePath: string,
+  rootDirectory: string,
+): { llmHint: string; displayHint: string } {
+  const hasGlobChars = /[*?[\]{}]/.test(filePath);
+  if (!hasGlobChars) {
+    return { llmHint: '', displayHint: '' };
+  }
+
+  const relativePattern = path
+    .relative(rootDirectory, filePath)
+    .replace(/\\/g, '/');
+  const patternForHint = relativePattern.startsWith('..')
+    ? filePath
+    : relativePattern;
+
+  return {
+    llmHint:
+      ' The path looks like a glob pattern. read_file does not expand wildcards. ' +
+      `Use the glob tool with pattern "${patternForHint}" to find matching files, then call read_file with the exact path.`,
+    displayHint:
+      ' The path looks like a glob pattern; read_file does not expand wildcards.',
+  };
+}
+
 /**
  * Reads and processes a single file, handling text, images, and PDFs.
  * @param filePath Absolute path to the file.
@@ -317,10 +342,12 @@ export async function processSingleFileContent(
   try {
     if (!fs.existsSync(filePath)) {
       // Sync check is acceptable before async read
+      const hint = buildMissingFileHint(filePath, rootDirectory);
       return {
         llmContent:
-          'Could not read file because no file was found at the specified path.',
-        returnDisplay: 'File not found.',
+          'Could not read file because no file was found at the specified path.' +
+          hint.llmHint,
+        returnDisplay: `File not found.${hint.displayHint}`,
         error: `File not found: ${filePath}`,
         errorType: ToolErrorType.FILE_NOT_FOUND,
       };

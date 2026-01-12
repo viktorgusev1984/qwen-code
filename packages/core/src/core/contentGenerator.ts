@@ -84,8 +84,8 @@ export function createContentGeneratorConfig(
   };
 
   if (authType === AuthType.QWEN_OAUTH) {
-    // For Qwen OAuth, we'll handle the API key dynamically in createContentGenerator
-    // Set a special marker to indicate this is Qwen OAuth
+    // For Gus Qwen OAuth, we'll handle the API key dynamically in createContentGenerator
+    // Set a special marker to indicate this is Gus Qwen OAuth
     return {
       ...newContentGeneratorConfig,
       model: DEFAULT_QWEN_MODEL,
@@ -149,7 +149,7 @@ export async function createContentGenerator(
     );
 
     try {
-      // Get the Qwen OAuth client (now includes integrated token management)
+      // Get the Gus Qwen OAuth client (now includes integrated token management)
       // If this is initial auth, require cached credentials to detect missing credentials
       const qwenClient = await getQwenOauthClient(
         gcConfig,

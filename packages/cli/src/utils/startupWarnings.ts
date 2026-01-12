@@ -7,9 +7,9 @@
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import { join as pathJoin } from 'node:path';
-import { getErrorMessage } from '@qwen-code/qwen-code-core';
+import { getErrorMessage } from '@psd-tech/gusqwen-core';
 
-const warningsFilePath = pathJoin(os.tmpdir(), 'qwen-code-warnings.txt');
+const warningsFilePath = pathJoin(os.tmpdir(), 'gusqwen-warnings.txt');
 
 export async function getStartupWarnings(): Promise<string[]> {
   try {

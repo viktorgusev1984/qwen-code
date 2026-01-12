@@ -34,7 +34,7 @@ describe('handleFallback', () => {
     expect(result).toBeNull();
   });
 
-  it('should handle Qwen OAuth error', async () => {
+  it('should handle Gus Qwen OAuth error', async () => {
     const result = await handleFallback(
       mockConfig,
       'test-model',

@@ -1,6 +1,6 @@
 /**
  * @license
- * Copyright 2025 Qwen Team
+ * Copyright 2025 Gus Qwen Team
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -12,7 +12,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { query, isSDKAssistantMessage, type SDKMessage } from '@qwen-code/sdk';
+import { query, isSDKAssistantMessage, type SDKMessage } from '@psd-tech/gusqwen-sdk';
 import {
   SDKTestHelper,
   extractText,

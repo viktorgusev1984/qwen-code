@@ -57,10 +57,10 @@ import { FixedDeque } from 'mnemonist';
 import { AuthType } from '../../core/contentGenerator.js';
 
 // Usage statistics collection endpoint
-const USAGE_STATS_HOSTNAME = 'gb4w8c3ygj-default-sea.rum.aliyuncs.com';
+const USAGE_STATS_HOSTNAME = 'localhost';
 const USAGE_STATS_PATH = '/';
 
-const RUN_APP_ID = 'gb4w8c3ygj@851d5d500f08f92';
+const RUN_APP_ID = '_';
 
 /**
  * Interval in which buffered events are sent to RUM.
@@ -86,7 +86,7 @@ export interface LogResponse {
 // Singleton class for batch posting log events to RUM. When a new event comes in, the elapsed time
 // is checked and events are flushed to RUM if at least a minute has passed since the last flush.
 export class QwenLogger {
-  private static instance: QwenLogger;
+  // private static instance: QwenLogger;
   private config?: Config;
   private readonly installationManager: InstallationManager;
 
@@ -130,14 +130,19 @@ export class QwenLogger {
     return `user-${installationId ?? 'unknown'}`;
   }
 
-  static getInstance(config?: Config): QwenLogger | undefined {
-    if (config === undefined || !config?.getUsageStatisticsEnabled())
-      return undefined;
-    if (!QwenLogger.instance) {
-      QwenLogger.instance = new QwenLogger(config);
-    }
-
-    return QwenLogger.instance;
+  static getInstance(_config?: Config): QwenLogger | undefined {
+    return undefined;
+    // if (config === undefined || !config?.getUsageStatisticsEnabled())
+    //   return undefined;
+    // if (!QwenLogger.instance) {
+    //   QwenLogger.instance = new QwenLogger(config);
+    //   process.on(
+    //     'exit',
+    //     QwenLogger.instance.shutdown.bind(QwenLogger.instance),
+    //   );
+    // }
+    //
+    // return QwenLogger.instance;
   }
 
   enqueueLogEvent(event: RumEvent): void {
@@ -237,7 +242,7 @@ export class QwenLogger {
       },
       view: {
         id: this.sessionId || this.config?.getSessionId(),
-        name: 'qwen-code-cli',
+        name: 'gusqwen-cli',
       },
       os: osMetadata,
 
@@ -253,7 +258,7 @@ export class QwenLogger {
           ? { channel: this.config.getChannel() }
           : {}),
       },
-      _v: `qwen-code@${version}`,
+      _v: `gusqwen@${version}`,
     } as RumPayload;
   }
 

@@ -34,12 +34,246 @@ import type {
 } from './modifiable-tool.js';
 import { IdeClient } from '../ide/ide-client.js';
 import { safeLiteralReplace } from '../utils/textUtils.js';
-import {
-  countOccurrences,
-  extractEditSnippet,
-  maybeAugmentOldStringForDeletion,
-  normalizeEditStrings,
-} from '../utils/editHelper.js';
+
+const HINT_READFILE = ` Hint: Use the ${ReadFileTool.Name} tool to read the file. Then, copy the EXACT text (including all whitespace, indentation, and newlines) from the output to use as the 'old_string' in your edit request.`;
+
+const HINT_NOOP = ` Hint: Use the ${ReadFileTool.Name} tool to read the file 'old_string' and 'new_string' are identical. Do NOT call ${ToolNames.EDIT} when there are no actual changes.`;
+
+function normalizeEols(input: string): string {
+  // Normalize CRLF and bare CR to LF
+  return input.replace(/\r\n?/g, '\n');
+}
+
+function unescapeLiteralNewlines(input: string): string {
+  // Replace literal backslash-n with real LF (do not touch other escapes)
+  return input.replace(/\\n/g, '\n');
+}
+
+// Однопроходное "псевдо-разэкранирование" для \n, \r, \t (остальные экраны не трогаем)
+function unescapeLiteralNewlinesOnce(input: string): string {
+  return input
+    .replace(/\\n/g, '\n')
+    .replace(/\\r/g, '\r')
+    .replace(/\\t/g, '\t');
+}
+
+// Двойное экранирование: "\\n" -> "\n" (сначала схлопываем \\n, затем обычный pass)
+function unescapeDoubleEscapedNewlines(input: string): string {
+  // Важно: порядок замен — сначала двойные, потом одинарные
+  return input
+    .replace(/\\\\n/g, '\n')
+    .replace(/\\\\r/g, '\r')
+    .replace(/\\\\t/g, '\t')
+    .replace(/\\n/g, '\n')
+    .replace(/\\r/g, '\r')
+    .replace(/\\t/g, '\t');
+}
+
+// Осторожная JSON-«расковка» строкового литерала, если похоже на экранированный блок.
+// Работает только если предварительные варианты дали 0 совпадений.
+function tryJsonUnquoteLiteral(input: string): string | null {
+  // эвристика: много обратных слэшей или \uXXXX — похоже на JSON-литерал
+  const isLikelyEscaped =
+    /\\[nrt"\\]/.test(input) || /\\u[0-9a-fA-F]{4}/.test(input);
+  if (!isLikelyEscaped) return null;
+  try {
+    // экранируем обратные слэши и кавычки, чтобы собрать валидную JSON-строку
+    const escaped = input.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+    return JSON.parse(`"${escaped}"`);
+  } catch {
+    return null;
+  }
+}
+
+function normalizeIndentOnlyLines(input: string): string {
+  // \n[пробелы/табуляция]+\n  ->  \n\n
+  return input.replace(/\n[ \t]+\n/g, '\n\n');
+}
+
+function buildLineOffsets(content: string): number[] {
+  const offsets: number[] = [];
+  const lines = content.split('\n');
+  let offset = 0;
+  for (let i = 0; i < lines.length; i++) {
+    offsets.push(offset);
+    offset += lines[i].length + 1; // +1 for '\n'
+  }
+  return offsets;
+}
+
+function indexToLine(offsets: number[], index: number): number {
+  let line = 0;
+  while (line + 1 < offsets.length && offsets[line + 1] <= index) {
+    line++;
+  }
+  return line;
+}
+
+function collectLineContexts(
+  content: string,
+  needle: string,
+  maxContexts = 3,
+  radius = 2,
+): string[] {
+  if (!needle) return [];
+  const contexts: string[] = [];
+  const lines = content.split('\n');
+  const offsets = buildLineOffsets(content);
+
+  let idx = content.indexOf(needle);
+  while (idx !== -1 && contexts.length < maxContexts) {
+    const line = indexToLine(offsets, idx);
+    const from = Math.max(0, line - radius);
+    const to = Math.min(lines.length - 1, line + radius);
+    const snippet = lines.slice(from, to + 1).join('\n');
+    contexts.push(`L${from + 1}-${to + 1}: ${snippet}`);
+    idx = content.indexOf(needle, idx + Math.max(needle.length, 1));
+  }
+
+  return contexts;
+}
+
+function probeLine(oldString: string): string | null {
+  for (const line of oldString.split('\n')) {
+    const trimmed = line.trim();
+    if (trimmed.length >= 3) {
+      return trimmed;
+    }
+  }
+  return null;
+}
+
+function findLooseBlockMatch(
+  currentContent: string,
+  pattern: string,
+): { start: number; end: number } | null {
+  const cur = normalizeEols(currentContent);
+  const pat = normalizeEols(pattern);
+
+  const curLines = cur.split('\n');
+  const patLines = pat.split('\n');
+
+  if (patLines.length === 0) return null;
+
+  // Предварительно посчитаем смещения начала каждой строки в cur
+  const lineOffsets: number[] = new Array(curLines.length);
+  let offset = 0;
+  for (let i = 0; i < curLines.length; i++) {
+    lineOffsets[i] = offset;
+    offset += curLines[i].length;
+    if (i < curLines.length - 1) offset += 1; // '\n'
+  }
+
+  outer: for (let i = 0; i + patLines.length <= curLines.length; i++) {
+    for (let j = 0; j < patLines.length; j++) {
+      const patLine = patLines[j].replace(/[ \t]+$/g, '');
+      const curLine = curLines[i + j].replace(/[ \t]+$/g, '');
+
+      const patEmpty = patLine === '';
+
+      if (patEmpty) {
+        // В old_string строка пустая → в файле допускаем пустую или только пробелы/табы
+        if (!/^[ \t]*$/.test(curLines[i + j])) {
+          continue outer;
+        }
+      } else {
+        // Непустые строки должны совпасть (без trailing spaces)
+        if (patLine !== curLine) {
+          continue outer;
+        }
+      }
+    }
+
+    // Совпадение найдено, считаем индекс начала/конца в исходной строке
+    const start = lineOffsets[i];
+    const lastLineIndex = i + patLines.length - 1;
+    const end =
+      lineOffsets[lastLineIndex] +
+      curLines[lastLineIndex].length +
+      (lastLineIndex < curLines.length - 1 ? 1 : 0); // включаем завершающий \n, если он есть
+
+    return { start, end };
+  }
+
+  return null;
+}
+
+function findLooseBlockMatchIgnoreIndent(
+  currentContent: string,
+  pattern: string,
+): { start: number; end: number } | null {
+  const cur = normalizeEols(currentContent);
+  const pat = normalizeEols(pattern);
+
+  const curLines = cur.split('\n');
+  const patLines = pat.split('\n');
+
+  if (patLines.length === 0) return null;
+
+  const lineOffsets: number[] = new Array(curLines.length);
+  let offset = 0;
+  for (let i = 0; i < curLines.length; i++) {
+    lineOffsets[i] = offset;
+    offset += curLines[i].length;
+    if (i < curLines.length - 1) offset += 1;
+  }
+
+  outer: for (let i = 0; i + patLines.length <= curLines.length; i++) {
+    for (let j = 0; j < patLines.length; j++) {
+      const patLine = patLines[j].trim();
+      const curLine = curLines[i + j].trim();
+
+      const patEmpty = patLine === '';
+      if (patEmpty) {
+        if (!/^[ \t]*$/.test(curLines[i + j])) continue outer;
+      } else if (patLine !== curLine) {
+        continue outer;
+      }
+    }
+
+    const start = lineOffsets[i];
+    const lastLineIndex = i + patLines.length - 1;
+    const end =
+      lineOffsets[lastLineIndex] +
+      curLines[lastLineIndex].length +
+      (lastLineIndex < curLines.length - 1 ? 1 : 0);
+
+    return { start, end };
+  }
+
+  return null;
+}
+
+function makeVariants(s: string): string[] {
+  // v1: как есть
+  const v1 = s;
+
+  // v2: нормализация EOL (CRLF/CR -> LF)
+  const v2 = normalizeEols(v1);
+
+  // v3: одинарные \n/\r/\t -> реальные переводы
+  const v3 = unescapeLiteralNewlinesOnce(v2);
+
+  // v4: двойные экранирования \\n/\\r/\\t -> реальные переводы
+  const v4 = unescapeDoubleEscapedNewlines(v2);
+
+  // v5: осторожный JSON-unquote (только если это действительно похоже на экранированный блок)
+  const v5maybe = tryJsonUnquoteLiteral(v2);
+  const v5 = v5maybe ?? v4; // если не получилось — просто повтор v4 (дедуп фильтранёт)
+  // v6: нормализация пустых строк из пробелов
+  const v6 = normalizeIndentOnlyLines(v2);
+
+  // Дедуп с сохранением порядка
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const v of [v1, v2, v3, v4, v5, v6]) {
+    if (!seen.has(v)) {
+      seen.add(v);
+      out.push(v);
+    }
+  }
+  return out;
+}
 
 export function applyReplacement(
   currentContent: string | null,
@@ -48,7 +282,8 @@ export function applyReplacement(
   isNewFile: boolean,
 ): string {
   if (isNewFile) {
-    return newString;
+    // Always normalize new file content to LF and expand literal \n
+    return normalizeEols(unescapeLiteralNewlines(newString));
   }
   if (currentContent === null) {
     // Should not happen if not a new file, but defensively return empty or newString if oldString is also empty
@@ -123,13 +358,17 @@ class EditToolInvocation implements ToolInvocation<EditToolParams, ToolResult> {
    * @throws File system errors if reading the file fails unexpectedly (e.g., permissions)
    */
   private async calculateEdit(params: EditToolParams): Promise<CalculatedEdit> {
-    const replaceAll = params.replace_all ?? false;
+    const replaceAll = params.replace_all === true;
+    const expectedReplacements = replaceAll ? null : 1;
     let currentContent: string | null = null;
     let fileExists = false;
     let isNewFile = false;
+
+    // Will be finalized after fallback strategy
     let finalNewString = params.new_string;
     let finalOldString = params.old_string;
     let occurrences = 0;
+
     let error:
       | { display: string; raw: string; type: ToolErrorType }
       | undefined = undefined;
@@ -138,8 +377,8 @@ class EditToolInvocation implements ToolInvocation<EditToolParams, ToolResult> {
       currentContent = await this.config
         .getFileSystemService()
         .readTextFile(params.file_path);
-      // Normalize line endings to LF for consistent processing.
-      currentContent = currentContent.replace(/\r\n/g, '\n');
+      // Normalize line endings for consistent processing.
+      currentContent = normalizeEols(currentContent);
       fileExists = true;
     } catch (err: unknown) {
       if (!isNodeError(err) || err.code !== 'ENOENT') {
@@ -149,15 +388,7 @@ class EditToolInvocation implements ToolInvocation<EditToolParams, ToolResult> {
       fileExists = false;
     }
 
-    const normalizedStrings = normalizeEditStrings(
-      currentContent,
-      finalOldString,
-      finalNewString,
-    );
-    finalOldString = normalizedStrings.oldString;
-    finalNewString = normalizedStrings.newString;
-
-    if (finalOldString === '' && !fileExists) {
+    if (params.old_string === '' && !fileExists) {
       // Creating a new file
       isNewFile = true;
     } else if (!fileExists) {
@@ -168,13 +399,6 @@ class EditToolInvocation implements ToolInvocation<EditToolParams, ToolResult> {
         type: ToolErrorType.FILE_NOT_FOUND,
       };
     } else if (currentContent !== null) {
-      finalOldString = maybeAugmentOldStringForDeletion(
-        currentContent,
-        finalOldString,
-        finalNewString,
-      );
-
-      occurrences = countOccurrences(currentContent, finalOldString);
       if (params.old_string === '') {
         // Error: Trying to create a file that already exists
         error = {
@@ -182,24 +406,227 @@ class EditToolInvocation implements ToolInvocation<EditToolParams, ToolResult> {
           raw: `File already exists, cannot create: ${params.file_path}`,
           type: ToolErrorType.ATTEMPT_TO_CREATE_EXISTING_FILE,
         };
-      } else if (occurrences === 0) {
-        error = {
-          display: `Failed to edit, could not find the string to replace.`,
-          raw: `Failed to edit, 0 occurrences found for old_string in ${params.file_path}. No edits made. The exact text in old_string was not found. Ensure you're not escaping content incorrectly and check whitespace, indentation, and context. Use ${ReadFileTool.Name} tool to verify.`,
-          type: ToolErrorType.EDIT_NO_OCCURRENCE_FOUND,
+      } else {
+        // ---------- Fallback search with multiple attempts ----------
+        // Для old_string оставляем агрессивную нормализацию (makeVariants),
+        // чтобы как можно надёжнее найти совпадение в файле.
+        const oldVariants = makeVariants(params.old_string);
+
+        // А для new_string НЕЛЬЗЯ делать unescape/JSON-unquote:
+        // JSON-декодер уже выдал то, что нужно положить в файл.
+        // Здесь только нормализуем переводы строк (CRLF/CR -> LF),
+        // но НЕ трогаем последовательности \n, \t, \r и т.п.
+        const newVariants = [normalizeEols(params.new_string)];
+
+        type Attempt = {
+          oldV: string;
+          newV: string;
+          occ: number;
+          ok: boolean;
+          reason?: string;
         };
-      } else if (!replaceAll && occurrences > 1) {
-        error = {
-          display: `Failed to edit because the text matches multiple locations. Provide more context or set replace_all to true.`,
-          raw: `Failed to edit. Found ${occurrences} occurrences for old_string in ${params.file_path} but replace_all was not enabled.`,
-          type: ToolErrorType.EDIT_EXPECTED_OCCURRENCE_MISMATCH,
-        };
-      } else if (finalOldString === finalNewString) {
-        error = {
-          display: `No changes to apply. The old_string and new_string are identical.`,
-          raw: `No changes to apply. The old_string and new_string are identical in file: ${params.file_path}`,
-          type: ToolErrorType.EDIT_NO_CHANGE,
-        };
+        const attempts: Attempt[] = [];
+        let matched: Attempt | null = null;
+
+        // Try pairs with same index first
+        const maxLen = Math.max(oldVariants.length, newVariants.length);
+        const pairs: Array<{ oldV: string; newV: string }> = [];
+        for (let i = 0; i < maxLen; i++) {
+          if (i < oldVariants.length && i < newVariants.length) {
+            pairs.push({ oldV: oldVariants[i], newV: newVariants[i] });
+          }
+        }
+        // Cross-combinations if not already included
+        for (const ov of oldVariants) {
+          for (const nv of newVariants) {
+            if (!pairs.find((p) => p.oldV === ov && p.newV === nv)) {
+              pairs.push({ oldV: ov, newV: nv });
+            }
+          }
+        }
+
+        for (const { oldV, newV } of pairs) {
+          const occ = this.countOccurrences(currentContent, oldV);
+          const ok =
+            oldV !== newV &&
+            (expectedReplacements === null
+              ? occ > 0
+              : occ === expectedReplacements);
+          attempts.push({
+            oldV,
+            newV,
+            occ,
+            ok,
+            reason: ok ? 'matched' : occ === 0 ? 'not found' : `found ${occ}`,
+          });
+          if (ok) {
+            matched = { oldV, newV, occ, ok };
+            break;
+          }
+        }
+
+          if (matched) {
+            finalOldString = matched.oldV;
+            finalNewString = matched.newV;
+            occurrences = matched.occ;
+          } else {
+            const anyFound = attempts.find(
+              (a) => a.occ > 0 && a.oldV !== a.newV,
+            );
+            const allSame =
+              attempts.length > 0 && attempts.every((a) => a.oldV === a.newV);
+
+            if (allSame) {
+              error = {
+              display:
+                'No changes to apply. The provided old_string and new_string are identical, so there is nothing to edit.' +
+                HINT_NOOP,
+              raw:
+                `Edit request is a no-op for file: ${params.file_path}. ` +
+                `All fallback variants have old_string === new_string. The tool will not apply an edit.` +
+                HINT_NOOP,
+              type: ToolErrorType.EDIT_NO_CHANGE,
+            };
+          } else if (anyFound && expectedReplacements === 1) {
+            finalOldString = anyFound.oldV;
+            finalNewString = anyFound.newV;
+            occurrences = anyFound.occ;
+
+            // --- context snippet around the first occurrence (±60 chars) ---
+              const firstIdx = currentContent.indexOf(anyFound.oldV);
+              const ctx =
+                firstIdx >= 0
+                  ? currentContent.slice(
+                      Math.max(0, firstIdx - 60),
+                    Math.min(
+                      currentContent.length,
+                      firstIdx + anyFound.oldV.length + 60,
+                    ),
+                  )
+                : '(not located)';
+            // ---------------------------------------------------------------
+
+            const lineContexts = collectLineContexts(
+              currentContent,
+              anyFound.oldV,
+            );
+
+            const occurrenceTerm =
+              expectedReplacements === 1 ? 'occurrence' : 'occurrences';
+            error = {
+              display:
+                `Failed to edit, expected ${expectedReplacements} ${occurrenceTerm} but found ${occurrences}.` +
+                (lineContexts.length
+                  ? ` Found matches at ${lineContexts.join(' | ')}.`
+                  : '') +
+                HINT_READFILE,
+              raw:
+                `Fallback tried ${attempts.length} variants; best found ${occurrences} occurrences for old_string in file: ${params.file_path}. ` +
+                `First occurrence context (±60 chars): ${JSON.stringify(ctx)}. ` +
+                `Variants tried: ` +
+                attempts
+                  .map((a, i) => `[${i + 1}] occ=${a.occ}; reason=${a.reason}`)
+                  .join('; ') +
+                `.` +
+                (lineContexts.length
+                  ? ` Line contexts: ${lineContexts.join(' || ')}.`
+                  : '') +
+                HINT_READFILE,
+              type: ToolErrorType.EDIT_EXPECTED_OCCURRENCE_MISMATCH,
+            };
+          } else if (expectedReplacements === 1 && currentContent !== null) {
+            // НОВОЕ: попытка найти блок построчно, позволяя различие только в пустых строках/пробелах
+            const loose =
+              findLooseBlockMatch(currentContent, params.old_string) ||
+              findLooseBlockMatchIgnoreIndent(
+                currentContent,
+                params.old_string,
+              );
+
+            if (loose) {
+              const realOld = currentContent.slice(loose.start, loose.end);
+              const occLoose = this.countOccurrences(currentContent, realOld);
+
+              if (occLoose === 1) {
+                finalOldString = realOld;
+                finalNewString = normalizeEols(params.new_string);
+                occurrences = 1;
+                // critical: НЕ ставим error, считаем, что матч нашёлся
+                error = undefined;
+              } else {
+                // На всякий случай, если блок встретился несколько раз — лучше честно упасть
+                error = {
+                  display:
+                    `Failed to edit, found multiple loose matches for the provided old_string.` +
+                    HINT_READFILE,
+                  raw:
+                    `Loose block search found ${occLoose} matches for old_string in ${params.file_path}.` +
+                    HINT_READFILE,
+                  type: ToolErrorType.EDIT_EXPECTED_OCCURRENCE_MISMATCH,
+                };
+              }
+            } else {
+              // Вообще ничего не нашли — старое поведение
+              const probe = probeLine(params.old_string);
+              const probeContexts =
+                probe !== null
+                  ? collectLineContexts(currentContent, probe)
+                  : [];
+              error = {
+                display:
+                  `Failed to edit, could not find the string to replace.` +
+                  (probeContexts.length
+                    ? ` Closest matches by line: ${probeContexts.join(' | ')}.`
+                    : '') +
+                  HINT_READFILE,
+                raw:
+                  `Failed to edit after ${attempts.length} fallback attempts. 0 usable occurrences found for all normalized variants in ${params.file_path}. ` +
+                  `Diagnostics: ` +
+                  attempts
+                    .map(
+                      (a, i) => `[${i + 1}] occ=${a.occ}; reason=${a.reason}`,
+                    )
+                    .join('; ') +
+                  `.` +
+                  (probeContexts.length
+                    ? ` Closest matches by line (probe=${probe ?? 'n/a'}): ${probeContexts.join(' || ')}.`
+                    : '') +
+                  HINT_READFILE,
+                type: ToolErrorType.EDIT_NO_OCCURRENCE_FOUND,
+              };
+            }
+          } else {
+            // expectedReplacements != 1 — оставляем старое поведение
+            error = {
+              display:
+                `Failed to edit, could not find the string to replace.` +
+                HINT_READFILE,
+              raw:
+                `Failed to edit after ${attempts.length} fallback attempts. 0 usable occurrences found for all normalized variants in ${params.file_path}. ` +
+                `Diagnostics: ` +
+                attempts
+                  .map((a, i) => `[${i + 1}] occ=${a.occ}; reason=${a.reason}`)
+                  .join('; ') +
+                `.` +
+                HINT_READFILE,
+              type: ToolErrorType.EDIT_NO_OCCURRENCE_FOUND,
+            };
+          }
+        }
+
+        // Дополнительный safety: если по какой-то причине ошибку не поставили,
+        // но finalOldString и finalNewString совпадают — это всё равно no-op.
+        if (!error && finalOldString === finalNewString) {
+          error = {
+            display:
+              'No changes to apply. old_string and new_string are identical, so there is nothing to change.' +
+              HINT_NOOP,
+            raw:
+              `No changes to apply. old_string and new_string are identical for file: ${params.file_path}.` +
+              HINT_NOOP,
+            type: ToolErrorType.EDIT_NO_CHANGE,
+          };
+        }
       }
     } else {
       // Should not happen if fileExists and no exception was thrown, but defensively:
@@ -210,20 +637,60 @@ class EditToolInvocation implements ToolInvocation<EditToolParams, ToolResult> {
       };
     }
 
-    const newContent = !error
-      ? applyReplacement(
-          currentContent,
-          finalOldString,
-          finalNewString,
-          isNewFile,
-        )
-      : (currentContent ?? '');
+    // ---------- Двухшаговое применение замены (агрессивное + консервативное) ----------
+    let newContent: string;
 
+    if (!error) {
+      const preparedNew = normalizeEols(finalNewString);
+
+      if (isNewFile) {
+        // Для новых файлов просто создаём содержимое из new_string
+        newContent = applyReplacement(
+          currentContent,
+          '',
+          preparedNew,
+          isNewFile,
+        );
+      } else {
+        // 1) Агрессивная попытка: разэкраниваем \n/\r/\t
+        const preparedOldAggressive = unescapeLiteralNewlines(
+          normalizeEols(finalOldString),
+        );
+        const attemptAggressive = applyReplacement(
+          currentContent,
+          preparedOldAggressive,
+          preparedNew,
+          isNewFile,
+        );
+
+        if (attemptAggressive !== currentContent) {
+          // Агрессивный вариант сработал — используем его
+          newContent = attemptAggressive;
+        } else {
+          // 2) Консервативная попытка: не трогаем \n, только нормализуем EOL
+          const preparedOldConservative = normalizeEols(finalOldString);
+          const attemptConservative = applyReplacement(
+            currentContent,
+            preparedOldConservative,
+            preparedNew,
+            isNewFile,
+          );
+          newContent = attemptConservative;
+        }
+      }
+    } else {
+      newContent = currentContent ?? '';
+    }
+
+    // --- Final no-op safeguard (after aggressive + conservative attempts) ---
     if (!error && fileExists && currentContent === newContent) {
       error = {
         display:
-          'No changes to apply. The new content is identical to the current content.',
-        raw: `No changes to apply. The new content is identical to the current content in file: ${params.file_path}`,
+          'No changes to apply. The file already matches the requested new content.' +
+          HINT_NOOP,
+        raw:
+          `No changes to apply. The file already matches the requested new content: ${params.file_path}.` +
+          HINT_NOOP,
         type: ToolErrorType.EDIT_NO_CHANGE,
       };
     }
@@ -235,6 +702,22 @@ class EditToolInvocation implements ToolInvocation<EditToolParams, ToolResult> {
       error,
       isNewFile,
     };
+  }
+
+  /**
+   * Counts occurrences of a substring in a string
+   */
+  private countOccurrences(str: string, substr: string): number {
+    if (substr === '') {
+      return 0;
+    }
+    let count = 0;
+    let pos = str.indexOf(substr);
+    while (pos !== -1) {
+      count++;
+      pos = str.indexOf(substr, pos + substr.length); // Start search after the current match
+    }
+    return count;
   }
 
   /**
@@ -422,16 +905,12 @@ class EditToolInvocation implements ToolInvocation<EditToolParams, ToolResult> {
       const llmSuccessMessageParts = [
         editData.isNewFile
           ? `Created new file: ${this.params.file_path} with provided content.`
-          : `The file: ${this.params.file_path} has been updated.`,
+          : `Successfully modified file: ${this.params.file_path} (${editData.occurrences} replacements).`,
       ];
-
-      const snippetResult = extractEditSnippet(
-        editData.currentContent,
-        editData.newContent,
-      );
-      if (snippetResult) {
-        const snippetText = `Showing lines ${snippetResult.startLine}-${snippetResult.endLine} of ${snippetResult.totalLines} from the edited file:\n\n---\n\n${snippetResult.content}`;
-        llmSuccessMessageParts.push(snippetText);
+      if (this.params.modified_by_user) {
+        llmSuccessMessageParts.push(
+          `User modified the \`new_string\` content to be: ${this.params.new_string}.`,
+        );
       }
 
       return {

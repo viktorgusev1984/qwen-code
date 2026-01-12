@@ -10,12 +10,12 @@ import type {
   TelemetrySettings,
   AuthType,
   ChatCompressionSettings,
-} from '@qwen-code/qwen-code-core';
+} from '@psd-tech/gusqwen-core';
 import {
   ApprovalMode,
   DEFAULT_TRUNCATE_TOOL_OUTPUT_LINES,
   DEFAULT_TRUNCATE_TOOL_OUTPUT_THRESHOLD,
-} from '@qwen-code/qwen-code-core';
+} from '@psd-tech/gusqwen-core';
 import type { CustomTheme } from '../ui/themes/theme.js';
 
 export type SettingsType =
@@ -154,7 +154,7 @@ const SETTINGS_SCHEMA = {
         requiresRestart: false,
         default: true,
         description:
-          'Automatically add a Co-authored-by trailer to git commit messages when commits are made through Qwen Code.',
+          'Automatically add a Co-authored-by trailer to git commit messages when commits are made through Gus Qwen.',
         showInDialog: false,
       },
       checkpointing: {
@@ -294,7 +294,7 @@ const SETTINGS_SCHEMA = {
         requiresRestart: false,
         default: false,
         description:
-          'Show Qwen Code status and thoughts in the terminal window title',
+          'Show Gemini CLI status and thoughts in the terminal window title',
         showInDialog: true,
       },
       hideTips: {
@@ -530,6 +530,20 @@ const SETTINGS_SCHEMA = {
         default: undefined as string | undefined,
         description: 'The model to use for conversations.',
         showInDialog: false,
+      },
+      streamingMode: {
+        type: 'string',
+        label: 'Response Mode',
+        category: 'Model',
+        requiresRestart: false,
+        default: 'sync' as 'stream' | 'sync',
+        description:
+          'Select whether responses stream incrementally or arrive as a single completion.',
+        showInDialog: true,
+        options: [
+          { label: 'Streaming', value: 'stream' },
+          { label: 'Synchronous (default)', value: 'sync' },
+        ],
       },
       maxSessionTurns: {
         type: 'number',

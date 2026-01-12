@@ -1,6 +1,6 @@
 /**
  * @license
- * Copyright 2025 Qwen Team
+ * Copyright 2025 Gus Qwen Team
  * SPDX-License-Identifier: Apache-2.0
  */
 import type { ApprovalModeValue } from './approvalModeValueTypes.js';
@@ -139,6 +139,23 @@ export interface PlanUpdate extends BaseSessionUpdate {
   };
 }
 
+export interface ChatCompressionUpdate extends BaseSessionUpdate {
+  update: {
+    sessionUpdate: 'chat_compression';
+    originalTokenCount: number;
+    newTokenCount: number;
+    trigger: 'auto' | 'manual';
+  };
+}
+
+export interface ConfirmActionUpdate extends BaseSessionUpdate {
+  update: {
+    sessionUpdate: 'confirm_action';
+    prompt: string;
+    originalInvocation: { raw: string };
+  };
+}
+
 export {
   ApprovalMode,
   APPROVAL_MODE_MAP,
@@ -173,6 +190,20 @@ export interface AuthenticateUpdateNotification {
   };
 }
 
+export interface AvailableCommand {
+  name: string;
+  description: string;
+  input: null;
+  subcommands?: AvailableCommand[];
+}
+
+export interface AvailableCommandsUpdate extends BaseSessionUpdate {
+  update: {
+    sessionUpdate: 'available_commands_update';
+    availableCommands: AvailableCommand[];
+  };
+}
+
 export type AcpSessionUpdate =
   | UserMessageChunkUpdate
   | AgentMessageChunkUpdate
@@ -180,7 +211,10 @@ export type AcpSessionUpdate =
   | ToolCallUpdate
   | ToolCallStatusUpdate
   | PlanUpdate
-  | CurrentModeUpdate;
+  | ChatCompressionUpdate
+  | ConfirmActionUpdate
+  | CurrentModeUpdate
+  | AvailableCommandsUpdate;
 
 // Permission request (simplified version, use schema.RequestPermissionRequest for validation)
 export interface AcpPermissionRequest {

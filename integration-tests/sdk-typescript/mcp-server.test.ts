@@ -1,12 +1,12 @@
 /**
  * @license
- * Copyright 2025 Qwen Team
+ * Copyright 2025 Gus Qwen Team
  * SPDX-License-Identifier: Apache-2.0
  */
 
 /**
  * E2E tests for MCP (Model Context Protocol) server integration via SDK
- * Tests that the SDK can properly interact with MCP servers configured in qwen-code
+ * Tests that the SDK can properly interact with MCP servers configured in gusqwen
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
@@ -19,7 +19,7 @@ import {
   type SDKMessage,
   type ToolUseBlock,
   type SDKSystemMessage,
-} from '@qwen-code/sdk';
+} from '@psd-tech/gusqwen-sdk';
 import {
   SDKTestHelper,
   createMCPServer,

@@ -23,8 +23,8 @@ export class FileTokenStorage extends BaseTokenStorage {
   }
 
   private deriveEncryptionKey(): Buffer {
-    const salt = `${os.hostname()}-${os.userInfo().username}-qwen-code`;
-    return crypto.scryptSync('qwen-code-oauth', salt, 32);
+    const salt = `${os.hostname()}-${os.userInfo().username}-gusqwen`;
+    return crypto.scryptSync('gusqwen-oauth', salt, 32);
   }
 
   private encrypt(text: string): string {

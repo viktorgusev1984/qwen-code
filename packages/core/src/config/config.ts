@@ -263,6 +263,8 @@ export interface SandboxConfig {
   image: string;
 }
 
+export type StreamingMode = 'stream' | 'sync';
+
 export interface ConfigParameters {
   sessionId?: string;
   sessionData?: ResumedSessionData;
@@ -345,6 +347,7 @@ export interface ConfigParameters {
   eventEmitter?: EventEmitter;
   useSmartEdit?: boolean;
   output?: OutputSettings;
+  streamingMode?: StreamingMode;
   inputFormat?: InputFormat;
   outputFormat?: OutputFormat;
   skipStartupContext?: boolean;
@@ -488,6 +491,7 @@ export class Config {
   private readonly enableToolOutputTruncation: boolean;
   private readonly eventEmitter?: EventEmitter;
   private readonly useSmartEdit: boolean;
+  private readonly streamingMode: StreamingMode;
   private readonly channel: string | undefined;
 
   constructor(params: ConfigParameters) {
@@ -535,8 +539,8 @@ export class Config {
     };
     this.gitCoAuthor = {
       enabled: params.gitCoAuthor ?? true,
-      name: 'Qwen-Coder',
-      email: 'qwen-coder@alibabacloud.com',
+      name: 'GusQwen',
+      email: 'v.n.gusev@tbank.ru',
     };
     this.usageStatisticsEnabled = params.usageStatisticsEnabled ?? true;
 
@@ -610,6 +614,8 @@ export class Config {
     this.inputFormat = params.inputFormat ?? InputFormat.TEXT;
     this.fileExclusions = new FileExclusions(this);
     this.eventEmitter = params.eventEmitter;
+    this.streamingMode = params.streamingMode ?? 'sync';
+
     if (params.contextFileName) {
       setGeminiMdFilename(params.contextFileName);
     }
@@ -1232,13 +1238,16 @@ export class Config {
       return Number.POSITIVE_INFINITY;
     }
 
-    return Math.min(
-      // Estimate remaining context window in characters (1 token ~= 4 chars).
+    // Estimate remaining context window in characters (1 token ~= 4 chars).
+    const estimatedRemaining =
       4 *
-        (tokenLimit(this.getModel()) -
-          uiTelemetryService.getLastPromptTokenCount()),
-      this.truncateToolOutputThreshold,
-    );
+      (tokenLimit(this.getModel()) -
+        uiTelemetryService.getLastPromptTokenCount());
+    if (!Number.isFinite(estimatedRemaining) || estimatedRemaining <= 0) {
+      return this.truncateToolOutputThreshold;
+    }
+
+    return Math.min(estimatedRemaining, this.truncateToolOutputThreshold);
   }
 
   getTruncateToolOutputLines(): number {
@@ -1255,6 +1264,14 @@ export class Config {
 
   getOutputFormat(): OutputFormat {
     return this.outputFormat;
+  }
+
+  getStreamingMode(): StreamingMode {
+    return this.streamingMode;
+  }
+
+  shouldStreamResponses(): boolean {
+    return this.streamingMode === 'stream';
   }
 
   async getGitService(): Promise<GitService> {

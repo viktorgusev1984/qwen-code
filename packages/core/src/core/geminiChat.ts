@@ -17,7 +17,7 @@ import type {
   GenerateContentResponseUsageMetadata,
 } from '@google/genai';
 import { ApiError, createUserContent } from '@google/genai';
-import { retryWithBackoff } from '../utils/retry.js';
+import { retryWithBackoffAndResetOn429 } from '../utils/retry.js';
 import type { Config } from '../config/config.js';
 import {
   DEFAULT_GEMINI_FLASH_MODEL,
@@ -204,6 +204,7 @@ export class GeminiChat {
   // A promise to represent the current state of the message being sent to the
   // model.
   private sendPromise: Promise<void> = Promise.resolve();
+  private pendingSyncStreamEvents: StreamEvent[] = [];
 
   /**
    * Creates a new GeminiChat instance.
@@ -346,6 +347,102 @@ export class GeminiChat {
     })();
   }
 
+  async sendMessage(
+    model: string,
+    params: SendMessageParameters,
+    prompt_id: string,
+  ): Promise<GenerateContentResponse> {
+    this.pendingSyncStreamEvents = [];
+    await this.sendPromise;
+
+    let sendDoneResolver: () => void;
+    const sendDonePromise = new Promise<void>((resolve) => {
+      sendDoneResolver = resolve;
+    });
+    this.sendPromise = sendDonePromise;
+
+    const userContent = createUserContent(params.message);
+
+    // Add user content to history ONCE before any attempts.
+    this.history.push(userContent);
+    const requestContents = this.getHistory(true);
+
+    try {
+      let lastError: unknown = new Error('Request failed after all retries.');
+
+      for (
+        let attempt = 0;
+        attempt < INVALID_CONTENT_RETRY_OPTIONS.maxAttempts;
+        attempt++
+      ) {
+        try {
+          const response = await this.makeApiCall(
+            model,
+            requestContents,
+            params,
+            prompt_id,
+          );
+
+          const processedResponse = this.processSyncResponse(model, response);
+          lastError = null;
+          return processedResponse;
+        } catch (error) {
+          lastError = error;
+          const isContentError = error instanceof InvalidStreamError;
+
+          if (isContentError) {
+            if (attempt < INVALID_CONTENT_RETRY_OPTIONS.maxAttempts - 1) {
+              this.pendingSyncStreamEvents.push({
+                type: StreamEventType.RETRY,
+              });
+              logContentRetry(
+                this.config,
+                new ContentRetryEvent(
+                  attempt,
+                  (error as InvalidStreamError).type,
+                  INVALID_CONTENT_RETRY_OPTIONS.initialDelayMs,
+                  model,
+                ),
+              );
+              await new Promise((res) =>
+                setTimeout(
+                  res,
+                  INVALID_CONTENT_RETRY_OPTIONS.initialDelayMs * (attempt + 1),
+                ),
+              );
+              continue;
+            }
+          }
+          break;
+        }
+      }
+
+      if (lastError) {
+        if (lastError instanceof InvalidStreamError) {
+          logContentRetryFailure(
+            this.config,
+            new ContentRetryFailureEvent(
+              INVALID_CONTENT_RETRY_OPTIONS.maxAttempts,
+              (lastError as InvalidStreamError).type,
+              model,
+            ),
+          );
+        }
+        throw lastError;
+      }
+
+      throw new Error('Request failed after all retries.');
+    } finally {
+      sendDoneResolver!();
+    }
+  }
+
+  drainPendingSyncStreamEvents(): StreamEvent[] {
+    const events = this.pendingSyncStreamEvents;
+    this.pendingSyncStreamEvents = [];
+    return events;
+  }
+
   private async makeApiCallAndProcessStream(
     model: string,
     requestContents: Content[],
@@ -382,7 +479,7 @@ export class GeminiChat {
       error?: unknown,
     ) => await handleFallback(this.config, model, authType, error);
 
-    const streamResponse = await retryWithBackoff(apiCall, {
+    const streamResponse = await retryWithBackoffAndResetOn429(apiCall, {
       shouldRetryOnError: (error: unknown) => {
         if (error instanceof ApiError && error.message) {
           if (error.status === 400) return false;
@@ -397,6 +494,57 @@ export class GeminiChat {
     });
 
     return this.processStreamResponse(model, streamResponse);
+  }
+
+  private async makeApiCall(
+    model: string,
+    requestContents: Content[],
+    params: SendMessageParameters,
+    prompt_id: string,
+  ): Promise<GenerateContentResponse> {
+    const apiCall = () => {
+      const modelToUse = getEffectiveModel(
+        this.config.isInFallbackMode(),
+        model,
+      );
+
+      if (
+        this.config.getQuotaErrorOccurred() &&
+        modelToUse === DEFAULT_GEMINI_FLASH_MODEL
+      ) {
+        throw new Error(
+          'Please submit a new query to continue with the Flash model.',
+        );
+      }
+
+      return this.config.getContentGenerator().generateContent(
+        {
+          model: modelToUse,
+          contents: requestContents,
+          config: { ...this.generationConfig, ...params.config },
+        },
+        prompt_id,
+      );
+    };
+
+    const onPersistent429Callback = async (
+      authType?: string,
+      error?: unknown,
+    ) => await handleFallback(this.config, model, authType, error);
+
+    return retryWithBackoffAndResetOn429(apiCall, {
+      shouldRetryOnError: (error: unknown) => {
+        if (error instanceof ApiError && error.message) {
+          if (error.status === 400) return false;
+          if (isSchemaDepthError(error.message)) return false;
+          if (error.status === 429) return true;
+          if (error.status >= 500 && error.status < 600) return true;
+        }
+        return false;
+      },
+      onPersistent429: onPersistent429Callback,
+      authType: this.config.getContentGeneratorConfig()?.authType,
+    });
   }
 
   /**
@@ -636,6 +784,109 @@ export class GeminiChat {
         ...consolidatedHistoryParts,
       ],
     });
+  }
+
+  private processSyncResponse(
+    model: string,
+    response: GenerateContentResponse,
+  ): GenerateContentResponse {
+    const allModelParts: Part[] = [];
+    let usageMetadata: GenerateContentResponseUsageMetadata | undefined;
+    let hasToolCall = false;
+    let hasFinishReason = false;
+
+    hasFinishReason =
+      response?.candidates?.some((candidate) => candidate.finishReason) ??
+      false;
+    if (isValidResponse(response)) {
+      const content = response.candidates?.[0]?.content;
+      if (content?.parts) {
+        if (content.parts.some((part) => part.functionCall)) {
+          hasToolCall = true;
+        }
+        allModelParts.push(...content.parts);
+      }
+    }
+
+    if (response.usageMetadata) {
+      usageMetadata = response.usageMetadata;
+      if (response.usageMetadata.promptTokenCount !== undefined) {
+        uiTelemetryService.setLastPromptTokenCount(
+          response.usageMetadata.promptTokenCount,
+        );
+      }
+    }
+
+    let thoughtText = '';
+    if (!this.config.getContentGenerator().useSummarizedThinking()) {
+      thoughtText = allModelParts
+        .filter((part) => part.thought)
+        .map((part) => part.text)
+        .join('')
+        .trim();
+    }
+
+    const contentParts = allModelParts.filter((part) => !part.thought);
+    const consolidatedHistoryParts: Part[] = [];
+    for (const part of contentParts) {
+      const lastPart =
+        consolidatedHistoryParts[consolidatedHistoryParts.length - 1];
+      if (
+        lastPart?.text &&
+        isValidNonThoughtTextPart(lastPart) &&
+        isValidNonThoughtTextPart(part)
+      ) {
+        lastPart.text += part.text;
+      } else if (isValidContentPart(part)) {
+        consolidatedHistoryParts.push(part);
+      }
+    }
+
+    const contentText = consolidatedHistoryParts
+      .filter((part) => part.text)
+      .map((part) => part.text)
+      .join('')
+      .trim();
+
+    if (thoughtText || contentText || hasToolCall || usageMetadata) {
+      this.chatRecordingService?.recordAssistantTurn({
+        model,
+        message: [
+          ...(thoughtText ? [{ text: thoughtText, thought: true }] : []),
+          ...(contentText ? [{ text: contentText }] : []),
+          ...(hasToolCall
+            ? contentParts
+                .filter((part) => part.functionCall)
+                .map((part) => ({ functionCall: part.functionCall }))
+            : []),
+        ],
+        tokens: usageMetadata,
+      });
+    }
+
+    if (!hasToolCall && (!hasFinishReason || !contentText)) {
+      if (!hasFinishReason) {
+        throw new InvalidStreamError(
+          'Model stream ended without a finish reason.',
+          'NO_FINISH_REASON',
+        );
+      } else {
+        throw new InvalidStreamError(
+          'Model stream ended with empty response text.',
+          'NO_RESPONSE_TEXT',
+        );
+      }
+    }
+
+    this.history.push({
+      role: 'model',
+      parts: [
+        ...(thoughtText ? [{ text: thoughtText, thought: true }] : []),
+        ...consolidatedHistoryParts,
+      ],
+    });
+
+    return response;
   }
 }
 

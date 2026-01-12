@@ -11,13 +11,13 @@ import {
   logIdeConnection,
   IdeConnectionEvent,
   IdeConnectionType,
-} from '@qwen-code/qwen-code-core';
+} from '@psd-tech/gusqwen-core';
 import {
   QWEN_CODE_COMPANION_EXTENSION_NAME,
   getIdeInstaller,
   IDEConnectionStatus,
   ideContextStore,
-} from '@qwen-code/qwen-code-core';
+} from '@psd-tech/gusqwen-core';
 import path from 'node:path';
 import type {
   CommandContext,
@@ -148,7 +148,7 @@ export const ideCommand = async (): Promise<SlashCommand> => {
           type: 'message',
           messageType: 'error',
           content: t(
-            'IDE integration is not supported in your current environment. To use this feature, run Qwen Code in one of these supported IDEs: VS Code or VS Code forks.',
+            'IDE integration is not supported in your current environment. To use this feature, run Gus Qwen in one of these supported IDEs: VS Code or VS Code forks.',
           ),
         }) as const,
     };

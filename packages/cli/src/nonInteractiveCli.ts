@@ -4,7 +4,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import type { Config, ToolCallRequestInfo } from '@qwen-code/qwen-code-core';
+import type {
+  Config,
+  ServerGeminiStreamEvent,
+  ToolCallRequestInfo,
+  ToolCallResponseInfo,
+} from '@psd-tech/gusqwen-core';
 import { isSlashCommand } from './ui/utils/commandUtils.js';
 import type { LoadedSettings } from './config/settings.js';
 import {
@@ -17,8 +22,8 @@ import {
   OutputFormat,
   InputFormat,
   uiTelemetryService,
-  parseAndFormatApiError,
-} from '@qwen-code/qwen-code-core';
+  ToolErrorType,
+} from '@psd-tech/gusqwen-core';
 import type { Content, Part, PartListUnion } from '@google/genai';
 import type { CLIUserMessage, PermissionMode } from './nonInteractive/types.js';
 import type { JsonOutputAdapterInterface } from './nonInteractive/io/BaseJsonOutputAdapter.js';
@@ -90,6 +95,9 @@ export async function runNonInteractive(
     let turnCount = 0;
     let totalApiDurationMs = 0;
     const startTime = Date.now();
+    let assistantMessageStarted = false;
+    let assistantMessageFinalized = false;
+    const debug = config.getDebugMode();
 
     const stdoutErrorHandler = (err: NodeJS.ErrnoException) => {
       if (err.code === 'EPIPE') {
@@ -161,7 +169,8 @@ export async function runNonInteractive(
       }
 
       const initialParts = normalizePartList(initialPartList);
-      let currentMessages: Content[] = [{ role: 'user', parts: initialParts }];
+      const originalUserParts = [...initialParts];
+      const baseUserMessage: Content = { role: 'user', parts: initialParts };
 
       if (adapter) {
         const systemMessage = await buildSystemMessage(
@@ -172,7 +181,7 @@ export async function runNonInteractive(
         adapter.emitMessage(systemMessage);
       }
 
-      let isFirstTurn = true;
+      // let isFirstTurn = true;
       while (true) {
         turnCount++;
         if (
@@ -182,28 +191,72 @@ export async function runNonInteractive(
           handleMaxTurnsExceededError(config);
         }
 
-        const toolCallRequests: ToolCallRequestInfo[] = [];
-        const apiStartTime = Date.now();
-        const responseStream = geminiClient.sendMessageStream(
-          currentMessages[0]?.parts || [],
-          abortController.signal,
-          prompt_id,
-          { isContinuation: !isFirstTurn },
-        );
-        isFirstTurn = false;
-
-        // Start assistant message for this turn
-        if (adapter) {
-          adapter.startAssistantMessage();
+        const shouldStream = config.shouldStreamResponses();
+        if (config.getDebugMode()) {
+          console.error(`[runNonInteractive] Streaming mode: ${shouldStream}`);
         }
+        const apiStartTime = Date.now();
+        let sawVisibleEvent = false;
+        let sawAssistantContent = false;
+        let streamError: Error | null = null;
+        const toolCallRequests: ToolCallRequestInfo[] = [];
 
-        for await (const event of responseStream) {
+        // Start assistant message lazily on first visible event to avoid empty messages
+        assistantMessageStarted = false;
+        assistantMessageFinalized = false;
+        const finalizeAssistantMessageIfNeeded = () => {
+          if (adapter && assistantMessageStarted && !assistantMessageFinalized) {
+            try {
+              adapter.finalizeAssistantMessage();
+              assistantMessageFinalized = true;
+            } catch (finalizeError) {
+              if (config.getDebugMode()) {
+                console.error(
+                  '[runNonInteractive] Failed to finalize assistant message after error:',
+                  finalizeError,
+                );
+              }
+            }
+          }
+        };
+
+        const handleGeminiEvent = (event: ServerGeminiStreamEvent) => {
           if (abortController.signal.aborted) {
             handleCancellationError(config);
+          }
+          if (event.type === GeminiEventType.Error) {
+            const message =
+              event.value?.error?.message ??
+              'Неизвестная ошибка модели (GeminiEventType.Error).';
+            streamError = new Error(message);
+            return;
+          }
+
+          if (event.type === GeminiEventType.SessionTokenLimitExceeded) {
+            const message =
+              event.value?.message ??
+              'Превышен лимит токенов сессии (GeminiEventType.SessionTokenLimitExceeded).';
+            streamError = new Error(message);
+            return;
+          }
+
+          if (event.type === GeminiEventType.Retry) {
+            // Очистим накопленное сообщение перед повторной попыткой,
+            // чтобы не продублировать ранее эмиттированные куски.
+            toolCallRequests.length = 0;
+            finalizeAssistantMessageIfNeeded();
+            assistantMessageStarted = false;
+            assistantMessageFinalized = false;
+            return;
           }
 
           if (adapter) {
             // Use adapter for all event processing
+            if (!assistantMessageStarted) {
+              adapter.startAssistantMessage();
+              assistantMessageStarted = true;
+              assistantMessageFinalized = false;
+            }
             adapter.processEvent(event);
             if (event.type === GeminiEventType.ToolCallRequest) {
               toolCallRequests.push(event.value);
@@ -216,22 +269,141 @@ export async function runNonInteractive(
               process.stdout.write(event.value);
             } else if (event.type === GeminiEventType.ToolCallRequest) {
               toolCallRequests.push(event.value);
-            } else if (event.type === GeminiEventType.Error) {
-              // Format and output the error message for text mode
-              const errorText = parseAndFormatApiError(
-                event.value.error,
-                config.getContentGeneratorConfig()?.authType,
-              );
-              process.stderr.write(`${errorText}\n`);
             }
+          }
+
+          if (
+            event.type === GeminiEventType.Content ||
+            event.type === GeminiEventType.ToolCallRequest ||
+            event.type === GeminiEventType.ToolCallResponse ||
+            event.type === GeminiEventType.Thought ||
+            event.type === GeminiEventType.Citation
+          ) {
+            sawVisibleEvent = true;
+          }
+
+          if (
+            event.type === GeminiEventType.Content ||
+            event.type === GeminiEventType.ToolCallResponse ||
+            event.type === GeminiEventType.Thought ||
+            event.type === GeminiEventType.Citation
+          ) {
+            sawAssistantContent = true;
+          }
+        };
+
+        if (shouldStream) {
+          // --- STREAM MODE ---
+          const responseStream = geminiClient.sendMessageStream(
+            baseUserMessage.parts || [],
+            abortController.signal,
+            prompt_id,
+          );
+
+          try {
+            for await (const event of responseStream) {
+              handleGeminiEvent(event);
+              if (debug) {
+                const payload =
+                  event.type === GeminiEventType.Content ||
+                  event.type === GeminiEventType.Thought ||
+                  event.type === GeminiEventType.Citation
+                    ? String(
+                        (event as { value?: unknown }).value ?? '',
+                      ).slice(0, 120)
+                    : '';
+                console.error(
+                  `[runNonInteractive][turn=${turnCount}] event=${event.type}${payload ? ` payload="${payload.replace(/\n/g, ' ')}"` : ''}`,
+                );
+              }
+            }
+          } catch (err) {
+            streamError = err instanceof Error ? err : new Error(String(err));
+          }
+        } else {
+          // --- SYNC MODE ---
+          const responseStream = geminiClient.sendMessageSync(
+            baseUserMessage.parts || [],
+            abortController.signal,
+            prompt_id,
+          );
+
+          try {
+            for await (const event of responseStream) {
+              handleGeminiEvent(event);
+              if (debug) {
+                const payload =
+                  event.type === GeminiEventType.Content ||
+                  event.type === GeminiEventType.Thought ||
+                  event.type === GeminiEventType.Citation
+                    ? String(
+                        (event as { value?: unknown }).value ?? '',
+                      ).slice(0, 120)
+                    : '';
+                console.error(
+                  `[runNonInteractive][turn=${turnCount}] event=${event.type}${payload ? ` payload="${payload.replace(/\n/g, ' ')}"` : ''}`,
+                );
+              }
+            }
+          } catch (err) {
+            streamError = err instanceof Error ? err : new Error(String(err));
           }
         }
 
-        // Finalize assistant message
-        if (adapter) {
-          adapter.finalizeAssistantMessage();
-        }
         totalApiDurationMs += Date.now() - apiStartTime;
+
+        // --- Обработка ошибок потока (общая для обоих режимов) ---
+        if (streamError) {
+          const errorMessage = `Ошибка отправки запроса к модели: ${streamError.message}`;
+          if (adapter) {
+            finalizeAssistantMessageIfNeeded();
+            const metrics = uiTelemetryService.getMetrics();
+            const usage = computeUsageFromMetrics(metrics);
+            const stats =
+              outputFormat === OutputFormat.JSON
+                ? uiTelemetryService.getMetrics()
+                : undefined;
+            adapter.emitResult({
+              isError: true,
+              durationMs: Date.now() - startTime,
+              apiDurationMs: totalApiDurationMs,
+              numTurns: turnCount,
+              errorMessage,
+              usage,
+              stats,
+            });
+            return;
+          } else {
+            handleError(streamError, config);
+            return;
+          }
+        }
+
+        // --- Обработка пустого ответа (только если не было ошибок) ---
+        if (!sawVisibleEvent) {
+          const emptyErrorMessage = 'Модель вернула пустой ответ.';
+          if (adapter) {
+            const metrics = uiTelemetryService.getMetrics();
+            const usage = computeUsageFromMetrics(metrics);
+            const stats =
+              outputFormat === OutputFormat.JSON
+                ? uiTelemetryService.getMetrics()
+                : undefined;
+            adapter.emitResult({
+              isError: true,
+              durationMs: Date.now() - startTime,
+              apiDurationMs: totalApiDurationMs,
+              numTurns: turnCount,
+              errorMessage: emptyErrorMessage,
+              usage,
+              stats,
+            });
+            return;
+          } else {
+            handleError(new Error(emptyErrorMessage), config);
+            return;
+          }
+        }
 
         if (toolCallRequests.length > 0) {
           const toolResponseParts: Part[] = [];
@@ -258,12 +430,14 @@ export async function runNonInteractive(
                 )
               : undefined;
             const taskToolProgressHandler = taskToolProgress?.handler;
-            const toolResponse = await executeToolCall(
-              config,
-              finalRequestInfo,
-              abortController.signal,
-              isTaskTool && taskToolProgressHandler
-                ? {
+            let toolResponse: ToolCallResponseInfo;
+            try {
+              toolResponse = await executeToolCall(
+                config,
+                finalRequestInfo,
+                abortController.signal,
+                isTaskTool && taskToolProgressHandler
+                  ? {
                     outputUpdateHandler: taskToolProgressHandler,
                     onToolCallsUpdate: toolCallUpdateCallback,
                   }
@@ -272,25 +446,49 @@ export async function runNonInteractive(
                       onToolCallsUpdate: toolCallUpdateCallback,
                     }
                   : undefined,
-            );
+              );
+            } catch (toolErr) {
+              const error =
+                toolErr instanceof Error ? toolErr : new Error(String(toolErr));
+              toolResponse = {
+                callId: finalRequestInfo.callId,
+                responseParts: [],
+                resultDisplay: error.message,
+                error,
+                errorType: ToolErrorType.EXECUTION_FAILED,
+              };
+              if (debug) {
+                console.error(
+                  `[runNonInteractive] Tool execution threw: ${error.message}`,
+                );
+              }
+            }
+
+            // Log the tool call result to stdout
+            // process.stdout.write(
+            //   `[TOOL_CALL_RESULT] ${JSON.stringify(toolResponse)}\n`,
+            // );
 
             // Note: In JSON mode, subagent messages are automatically added to the main
             // adapter's messages array and will be output together on emitResult()
 
             if (toolResponse.error) {
-              // In JSON/STREAM_JSON mode, tool errors are tolerated and formatted
-              // as tool_result blocks. handleToolError will detect JSON/STREAM_JSON mode
-              // from config and allow the session to continue so the LLM can decide what to do next.
-              // In text mode, we still log the error.
-              handleToolError(
-                finalRequestInfo.name,
-                toolResponse.error,
-                config,
-                toolResponse.errorType || 'TOOL_EXECUTION_ERROR',
-                typeof toolResponse.resultDisplay === 'string'
-                  ? toolResponse.resultDisplay
-                  : undefined,
-              );
+              if (!adapter) {
+                // In text mode, still log via handler
+                handleToolError(
+                  finalRequestInfo.name,
+                  toolResponse.error,
+                  config,
+                  toolResponse.errorType || 'TOOL_EXECUTION_ERROR',
+                  typeof toolResponse.resultDisplay === 'string'
+                    ? toolResponse.resultDisplay
+                    : undefined,
+                );
+              } else if (debug) {
+                console.error(
+                  `[runNonInteractive] Tool error (non-fatal in JSON/STREAM_JSON): ${toolResponse.error.message}`,
+                );
+              }
             }
 
             if (adapter) {
@@ -299,12 +497,88 @@ export async function runNonInteractive(
 
             if (toolResponse.responseParts) {
               toolResponseParts.push(...toolResponse.responseParts);
+            } else {
+              const fallbackText =
+                (typeof toolResponse.resultDisplay === 'string'
+                  ? toolResponse.resultDisplay
+                  : null) ??
+                (toolResponse.error ? toolResponse.error.message : null) ??
+                `Инструмент ${finalRequestInfo.name} не вернул данных.`;
+
+              toolResponseParts.push({ text: fallbackText });
             }
           }
-          currentMessages = [{ role: 'user', parts: toolResponseParts }];
+          // Следующий запрос строим из исходного запроса + ответов инструментов,
+          // чтобы модель не теряла контекст задачи.
+          baseUserMessage.parts = [...originalUserParts, ...toolResponseParts];
+          if (debug) {
+            const preview =
+              (baseUserMessage.parts[0] && 'text' in baseUserMessage.parts[0]
+                ? (baseUserMessage.parts[0] as { text?: string }).text ?? ''
+                : ''
+              ).slice(0, 120);
+            console.error(
+              `[runNonInteractive][turn=${turnCount}] next prompt parts=${baseUserMessage.parts.length} preview="${preview.replace(/\n/g, ' ')}"`,
+            );
+          }
         } else {
+          // Пустой ответ без контента/тулколов считаем ошибкой, чтобы не возвращать "успех" с пустым result.
+          if (!sawVisibleEvent) {
+            const emptyErrorMessage = 'Модель вернула пустой ответ.';
+            if (adapter) {
+              finalizeAssistantMessageIfNeeded();
+              const metrics = uiTelemetryService.getMetrics();
+              const usage = computeUsageFromMetrics(metrics);
+              const stats =
+                outputFormat === OutputFormat.JSON
+                  ? uiTelemetryService.getMetrics()
+                  : undefined;
+              adapter.emitResult({
+                isError: true,
+                durationMs: Date.now() - startTime,
+                apiDurationMs: totalApiDurationMs,
+                numTurns: turnCount,
+                errorMessage: emptyErrorMessage,
+                usage,
+                stats,
+              });
+              return;
+            } else {
+              handleError(new Error(emptyErrorMessage), config);
+            }
+          }
+
+          // Если не получили ни одного текстового/мыслительного события — считаем отсутствие финального ответа.
+          if (!sawAssistantContent) {
+            const noContentMessage =
+              'Модель не вернула финальный ответ (нет текстовых событий).';
+            if (adapter) {
+              finalizeAssistantMessageIfNeeded();
+              const metrics = uiTelemetryService.getMetrics();
+              const usage = computeUsageFromMetrics(metrics);
+              const stats =
+                outputFormat === OutputFormat.JSON
+                  ? uiTelemetryService.getMetrics()
+                  : undefined;
+              adapter.emitResult({
+                isError: true,
+                durationMs: Date.now() - startTime,
+                apiDurationMs: totalApiDurationMs,
+                numTurns: turnCount,
+                errorMessage: noContentMessage,
+                usage,
+                stats,
+              });
+              return;
+            } else {
+              handleError(new Error(noContentMessage), config);
+              return;
+            }
+          }
+
           // For JSON and STREAM_JSON modes, compute usage from metrics
           if (adapter) {
+            finalizeAssistantMessageIfNeeded();
             const metrics = uiTelemetryService.getMetrics();
             const usage = computeUsageFromMetrics(metrics);
             // Get stats for JSON format output
@@ -330,7 +604,22 @@ export async function runNonInteractive(
     } catch (error) {
       // For JSON and STREAM_JSON modes, compute usage from metrics
       const message = error instanceof Error ? error.message : String(error);
+      // process.stdout.write(`[AGENT_ERROR] ${message}\n`);
       if (adapter) {
+        // Ensure the assistant message is closed so streaming consumers receive message_stop
+        if (assistantMessageStarted && !assistantMessageFinalized) {
+          try {
+            adapter.finalizeAssistantMessage();
+            assistantMessageFinalized = true;
+          } catch (finalizeError) {
+            if (config.getDebugMode()) {
+              console.error(
+                '[runNonInteractive] Failed to finalize assistant message in error path:',
+                finalizeError,
+              );
+            }
+          }
+        }
         const metrics = uiTelemetryService.getMetrics();
         const usage = computeUsageFromMetrics(metrics);
         // Get stats for JSON format output

@@ -1,18 +1,18 @@
 # Commands
 
-This document details all commands supported by Qwen Code, helping you efficiently manage sessions, customize the interface, and control its behavior.
+This document details all commands supported by Gus Qwen, helping you efficiently manage sessions, customize the interface, and control its behavior.
 
-Qwen Code commands are triggered through specific prefixes and fall into three categories:
+Gus Qwen commands are triggered through specific prefixes and fall into three categories:
 
 | Prefix Type                | Function Description                                | Typical Use Case                                                 |
 | -------------------------- | --------------------------------------------------- | ---------------------------------------------------------------- |
-| Slash Commands (`/`)       | Meta-level control of Qwen Code itself              | Managing sessions, modifying settings, getting help              |
+| Slash Commands (`/`)       | Meta-level control of Gus Qwen itself              | Managing sessions, modifying settings, getting help              |
 | At Commands (`@`)          | Quickly inject local file content into conversation | Allowing AI to analyze specified files or code under directories |
 | Exclamation Commands (`!`) | Direct interaction with system Shell                | Executing system commands like `git status`, `ls`, etc.          |
 
 ## 1. Slash Commands (`/`)
 
-Slash commands are used to manage Qwen Code sessions, interface, and basic behavior.
+Slash commands are used to manage Gus Qwen sessions, interface, and basic behavior.
 
 ### 1.1 Session and Project Management
 
@@ -33,7 +33,7 @@ Commands for adjusting interface appearance and work environment.
 | Command      | Description                              | Usage Examples                |
 | ------------ | ---------------------------------------- | ----------------------------- |
 | `/clear`     | Clear terminal screen content            | `/clear` (shortcut: `Ctrl+L`) |
-| `/theme`     | Change Qwen Code visual theme            | `/theme`                      |
+| `/theme`     | Change Gus Qwen visual theme            | `/theme`                      |
 | `/vim`       | Turn input area Vim editing mode on/off  | `/vim`                        |
 | `/directory` | Manage multi-directory support workspace | `/dir add ./src,./tests`      |
 | `/editor`    | Open dialog to select supported editor   | `/editor`                     |
@@ -79,10 +79,10 @@ Commands for obtaining information and performing system settings.
 | `/stats`        | Display detailed statistics for current session | `/stats`                                         |
 | `/settings`     | Open settings editor                            | `/settings`                                      |
 | `/auth`         | Change authentication method                    | `/auth`                                          |
-| `/bug`          | Submit issue about Qwen Code                    | `/bug Button click unresponsive`                 |
+| `/bug`          | Submit issue about Gus Qwen                    | `/bug Button click unresponsive`                 |
 | `/copy`         | Copy last output content to clipboard           | `/copy`                                          |
 | `/quit-confirm` | Show confirmation dialog before quitting        | `/quit-confirm` (shortcut: press `Ctrl+C` twice) |
-| `/quit`         | Exit Qwen Code immediately                      | `/quit` or `/exit`                               |
+| `/quit`         | Exit Gus Qwen immediately                      | `/quit` or `/exit`                               |
 
 ### 1.6 Common Shortcuts
 
@@ -108,7 +108,7 @@ Note: Spaces in paths need to be escaped with backslash (e.g., `@My\ Documents/f
 
 ## 3. Exclamation Commands (`!`) - Shell Command Execution
 
-Exclamation commands allow you to execute system commands directly within Qwen Code.
+Exclamation commands allow you to execute system commands directly within Gus Qwen.
 
 | Command Format     | Description                                                        | Examples                               |
 | ------------------ | ------------------------------------------------------------------ | -------------------------------------- |

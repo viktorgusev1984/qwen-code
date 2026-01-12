@@ -7,6 +7,8 @@
 import type { GenerateContentResponse } from '@google/genai';
 import { AuthType } from '../core/contentGenerator.js';
 import {
+  isProQuotaExceededError,
+  isGenericQuotaExceededError,
   isQwenQuotaExceededError,
   isQwenThrottlingError,
 } from './quotaErrorDetection.js';
@@ -26,6 +28,7 @@ export interface RetryOptions {
     error?: unknown,
   ) => Promise<string | boolean | null>;
   authType?: string;
+  retryDelayBufferPercent?: number; // Percentage to add to retry delay for more effective operation
 }
 
 const DEFAULT_RETRY_OPTIONS: RetryOptions = {
@@ -33,26 +36,54 @@ const DEFAULT_RETRY_OPTIONS: RetryOptions = {
   initialDelayMs: 5000,
   maxDelayMs: 30000, // 30 seconds
   shouldRetryOnError: defaultShouldRetry,
+  retryDelayBufferPercent: 10, // Add 10% buffer to retry delays by default
 };
+
+type HttpErrorLike = {
+  status?: number;
+  statusCode?: number;
+  response?: { status?: number; statusCode?: number };
+  cause?: { status?: number } | unknown;
+  code?: number | string;
+  message?: string;
+};
+
+function readMessage(err: unknown): string {
+  if (err instanceof Error && typeof err.message === 'string')
+    return err.message;
+  const e = err as { message?: unknown };
+  if (typeof e?.message === 'string') return e.message;
+  return String(err ?? '');
+}
+
+function readCode(err: unknown): string {
+  const raw = (err as { code?: unknown })?.code;
+  return typeof raw === 'string'
+    ? raw.toLowerCase()
+    : String(raw ?? '').toLowerCase();
+}
 
 /**
  * Default predicate function to determine if a retry should be attempted.
- * Retries on 429 (Too Many Requests) and 5xx server errors.
+ * Retries on 429 (Too Many Requests), 5xx server errors, and request timeouts.
  * @param error The error object.
  * @returns True if the error is a transient error, false otherwise.
  */
-function defaultShouldRetry(error: Error | unknown): boolean {
-  // Check for common transient error status codes either in message or a status property
-  if (error && typeof (error as { status?: number }).status === 'number') {
-    const status = (error as { status: number }).status;
-    if (status === 429 || (status >= 500 && status < 600)) {
-      return true;
-    }
-  }
-  if (error instanceof Error && error.message) {
-    if (error.message.includes('429')) return true;
-    if (error.message.match(/5\d{2}/)) return true;
-  }
+export function defaultShouldRetry(error: unknown): boolean {
+  const status = getErrorStatus(error);
+  if (status === 429) return true;
+  if (typeof status === 'number' && status >= 500 && status < 600) return true;
+
+  const msg = readMessage(error).toLowerCase();
+  if (/\b429\b/.test(msg)) return true;
+  if (/rate[\s-]?limit/.test(msg)) return true;
+  if (/temporar(il)?y (unavailable|overloaded|busy)/.test(msg)) return true;
+  if (/request timeout/.test(msg)) return true;
+
+  const code = readCode(error);
+  if (code === 'etimedout' || code === 'econnreset' || code === 'ecanceled')
+    return true;
+
   return false;
 }
 
@@ -67,6 +98,7 @@ function delay(ms: number): Promise<void> {
 
 /**
  * Retries a function with exponential backoff and jitter.
+ * Supports adding a buffer percentage to retry delays for more effective operation under rate limits.
  * @param fn The asynchronous function to retry.
  * @param options Optional retry configuration.
  * @returns A promise that resolves with the result of the function if successful.
@@ -88,9 +120,11 @@ export async function retryWithBackoff<T>(
     maxAttempts,
     initialDelayMs,
     maxDelayMs,
+    onPersistent429,
     authType,
     shouldRetryOnError,
     shouldRetryOnContent,
+    retryDelayBufferPercent,
   } = {
     ...DEFAULT_RETRY_OPTIONS,
     ...cleanOptions,
@@ -120,8 +154,66 @@ export async function retryWithBackoff<T>(
     } catch (error) {
       const errorStatus = getErrorStatus(error);
 
-      // Check for Qwen OAuth quota exceeded error - throw immediately without retry
-      if (authType === AuthType.QWEN_OAUTH && isQwenQuotaExceededError(error)) {
+      // Check for Pro quota exceeded error first - immediate fallback for OAuth users
+      if (
+        errorStatus === 429 &&
+        authType === AuthType.QWEN_OAUTH &&
+        isProQuotaExceededError(error) &&
+        onPersistent429
+      ) {
+        try {
+          const fallbackModel = await onPersistent429(authType, error);
+          if (fallbackModel !== false && fallbackModel !== null) {
+            // Reset attempt counter and try with new model
+            attempt = 0;
+            consecutive429Count = 0;
+            currentDelay = initialDelayMs;
+            // With the model updated, we continue to the next attempt
+            continue;
+          } else {
+            // Fallback handler returned null/false, meaning don't continue - stop retry process
+            throw error;
+          }
+        } catch (fallbackError) {
+          // If fallback fails, continue with original error
+          console.warn('Fallback to Flash model failed:', fallbackError);
+        }
+      }
+
+      // Check for generic quota exceeded error (but not Pro, which was handled above) - immediate fallback for OAuth users
+      if (
+        errorStatus === 429 &&
+        authType === AuthType.QWEN_OAUTH &&
+        !isProQuotaExceededError(error) &&
+        isGenericQuotaExceededError(error) &&
+        onPersistent429
+      ) {
+        try {
+          const fallbackModel = await onPersistent429(authType, error);
+          if (fallbackModel !== false && fallbackModel !== null) {
+            // Reset attempt counter and try with new model
+            attempt = 0;
+            consecutive429Count = 0;
+            currentDelay = initialDelayMs;
+            // With the model updated, we continue to the next attempt
+            continue;
+          } else {
+            // Fallback handler returned null/false, meaning don't continue - stop retry process
+            throw error;
+          }
+        } catch (fallbackError) {
+          // If fallback fails, continue with original error
+          console.warn('Fallback to Flash model failed:', fallbackError);
+        }
+      }
+
+      // Check for Gus Qwen OAuth quota exceeded error - throw immediately without retry
+      // But allow retry for throttling errors (e.g., TPM rate limits)
+      if (
+        authType === AuthType.QWEN_OAUTH &&
+        isQwenQuotaExceededError(error) &&
+        !isQwenThrottlingError(error)
+      ) {
         throw new Error(
           `Qwen API quota exceeded: Your Qwen API quota has been exhausted. Please wait for your quota to reset.`,
         );
@@ -141,7 +233,30 @@ export async function retryWithBackoff<T>(
         consecutive429Count = 0;
       }
 
-      console.debug('consecutive429Count', consecutive429Count);
+      // If we have persistent 429s and a fallback callback for OAuth
+      if (
+        consecutive429Count >= 2 &&
+        onPersistent429 &&
+        authType === AuthType.QWEN_OAUTH
+      ) {
+        try {
+          const fallbackModel = await onPersistent429(authType, error);
+          if (fallbackModel !== false && fallbackModel !== null) {
+            // Reset attempt counter and try with new model
+            attempt = 0;
+            consecutive429Count = 0;
+            currentDelay = initialDelayMs;
+            // With the model updated, we continue to the next attempt
+            continue;
+          } else {
+            // Fallback handler returned null/false, meaning don't continue - stop retry process
+            throw error;
+          }
+        } catch (fallbackError) {
+          // If fallback fails, continue with original error
+          console.warn('Fallback to Flash model failed:', fallbackError);
+        }
+      }
 
       // Check if we've exhausted retries or shouldn't retry
       if (attempt >= maxAttempts || !shouldRetryOnError(error as Error)) {
@@ -152,16 +267,21 @@ export async function retryWithBackoff<T>(
         getDelayDurationAndStatus(error);
 
       if (delayDurationMs > 0) {
-        // Respect Retry-After header if present and parsed
+        // Respect Retry-After header if present and parsed, but add buffer percentage for more effective operation
+        const bufferedDelayMs = Math.round(
+          delayDurationMs * (1 + (retryDelayBufferPercent || 0) / 100),
+        );
         console.warn(
-          `Attempt ${attempt} failed with status ${delayErrorStatus ?? 'unknown'}. Retrying after explicit delay of ${delayDurationMs}ms...`,
+          `Attempt ${attempt} failed with status ${
+            delayErrorStatus ?? 'unknown'
+          }. Retrying after explicit delay of ${bufferedDelayMs}ms (original: ${delayDurationMs}ms, +${retryDelayBufferPercent}% buffer)...`,
           error,
         );
-        await delay(delayDurationMs);
+        await delay(bufferedDelayMs);
         // Reset currentDelay for next potential non-429 error, or if Retry-After is not present next time
         currentDelay = initialDelayMs;
       } else {
-        // Fallback to exponential backoff with jitter
+        // Fall back to exponential backoff with jitter
         logRetryAttempt(attempt, error, errorStatus);
         // Add jitter: +/- 30% of currentDelay
         const jitter = currentDelay * 0.3 * (Math.random() * 2 - 1);
@@ -182,62 +302,157 @@ export async function retryWithBackoff<T>(
  * @returns The HTTP status code, or undefined if not found.
  */
 export function getErrorStatus(error: unknown): number | undefined {
-  if (typeof error === 'object' && error !== null) {
-    if ('status' in error && typeof error.status === 'number') {
-      return error.status;
+  const e = error as HttpErrorLike;
+  return (
+    (typeof e?.status === 'number' && e.status) ||
+    (typeof e?.statusCode === 'number' && e.statusCode) ||
+    (typeof e?.response?.status === 'number' && e.response.status) ||
+    (typeof e?.response?.statusCode === 'number' && e.response.statusCode) ||
+    (typeof (e?.cause as { status?: number })?.status === 'number'
+      ? (e!.cause as { status: number }).status
+      : undefined) ||
+    (typeof e?.code === 'number' ? e.code : undefined)
+  );
+}
+
+type HeadersLike =
+  | Record<string, unknown>
+  | Map<string, unknown>
+  | { get(name: string): string | null }
+  | undefined;
+
+interface ResponseLike {
+  headers?: HeadersLike;
+}
+
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return (
+    typeof v === 'object' &&
+    v !== null &&
+    !(v instanceof Map) &&
+    !('get' in (v as object))
+  );
+}
+
+function isHeadersGet(v: unknown): v is { get(name: string): string | null } {
+  return (
+    typeof v === 'object' &&
+    v !== null &&
+    'get' in v &&
+    typeof (v as { get?: unknown }).get === 'function'
+  );
+}
+
+function isMap(v: unknown): v is Map<string, unknown> {
+  return v instanceof Map;
+}
+
+function readHeader(headers: HeadersLike, name: string): string | undefined {
+  if (!headers) return undefined;
+  const lower = name.toLowerCase();
+
+  if (isHeadersGet(headers)) {
+    return headers.get(name) ?? headers.get(lower) ?? undefined;
+  }
+  if (isMap(headers)) {
+    for (const [k, v] of headers.entries()) {
+      if (String(k).toLowerCase() === lower)
+        return typeof v === 'string' ? v : String(v);
     }
-    // Check for error.response.status (common in axios errors)
-    if (
-      'response' in error &&
-      typeof (error as { response?: unknown }).response === 'object' &&
-      (error as { response?: unknown }).response !== null
-    ) {
-      const response = (
-        error as { response: { status?: unknown; headers?: unknown } }
-      ).response;
-      if ('status' in response && typeof response.status === 'number') {
-        return response.status;
-      }
-    }
+    return undefined;
+  }
+  if (isRecord(headers)) {
+    const key = Object.keys(headers).find((k) => k.toLowerCase() === lower);
+    if (!key) return undefined;
+    const val = headers[key];
+    return typeof val === 'string'
+      ? val
+      : val != null
+        ? String(val)
+        : undefined;
+  }
+  return undefined;
+}
+
+function getResponseFromError(error: unknown): ResponseLike | undefined {
+  if (typeof error !== 'object' || error === null) return undefined;
+  const maybe = error as { response?: unknown };
+  if (maybe.response && typeof maybe.response === 'object') {
+    return maybe.response as ResponseLike;
   }
   return undefined;
 }
 
 /**
- * Extracts the Retry-After delay from an error object's headers.
+ * Extracts the Retry-After delay from an error object's headers or message.
+ * First checks for Retry-After header, then parses error message for delay information.
  * @param error The error object.
  * @returns The delay in milliseconds, or 0 if not found or invalid.
  */
-function getRetryAfterDelayMs(error: unknown): number {
-  if (typeof error === 'object' && error !== null) {
-    // Check for error.response.headers (common in axios errors)
-    if (
-      'response' in error &&
-      typeof (error as { response?: unknown }).response === 'object' &&
-      (error as { response?: unknown }).response !== null
-    ) {
-      const response = (error as { response: { headers?: unknown } }).response;
-      if (
-        'headers' in response &&
-        typeof response.headers === 'object' &&
-        response.headers !== null
-      ) {
-        const headers = response.headers as { 'retry-after'?: unknown };
-        const retryAfterHeader = headers['retry-after'];
-        if (typeof retryAfterHeader === 'string') {
-          const retryAfterSeconds = parseInt(retryAfterHeader, 10);
-          if (!isNaN(retryAfterSeconds)) {
-            return retryAfterSeconds * 1000;
-          }
-          // It might be an HTTP date
-          const retryAfterDate = new Date(retryAfterHeader);
-          if (!isNaN(retryAfterDate.getTime())) {
-            return Math.max(0, retryAfterDate.getTime() - Date.now());
-          }
-        }
-      }
+export function getRetryAfterDelayMs(error: unknown): number {
+  // 1) Пробуем заголовки ответа
+  const resp = getResponseFromError(error);
+  const headers = resp?.headers;
+
+  const retryAfterHeader =
+    readHeader(headers, 'Retry-After') ?? readHeader(headers, 'retry-after');
+
+  if (retryAfterHeader) {
+    const secs = Number(retryAfterHeader);
+    if (!Number.isNaN(secs)) return secs * 1000;
+
+    const asDate = new Date(retryAfterHeader);
+    if (!Number.isNaN(asDate.getTime())) {
+      return Math.max(0, asDate.getTime() - Date.now());
     }
   }
+
+  // 2) OpenAI-подобные хедеры сброса лимита (секунды до сброса)
+  const oaReset =
+    readHeader(headers, 'x-ratelimit-reset-requests') ??
+    readHeader(headers, 'x-ratelimit-reset-tokens');
+
+  if (oaReset) {
+    const s = Number(oaReset);
+    if (!Number.isNaN(s)) return Math.max(0, s) * 1000;
+  }
+
+  // 3) Парсим текст ошибки: "retry after 2.9s" / "431.9ms" / "4m26.80809158s"
+  const msg =
+    error instanceof Error
+      ? error.message
+      : typeof (error as { message?: unknown })?.message === 'string'
+        ? (error as { message: string }).message
+        : String(error ?? '');
+
+  // Обработка формата с минутами и секундами (4m26.80809158s)
+  const m1 = msg.match(/retry after (\d+)m([\d.]+)s/i);
+  if (m1) {
+    const minutes = Number(m1[1]);
+    const seconds = Number(m1[2]);
+    if (!Number.isNaN(minutes) && !Number.isNaN(seconds)) {
+      return (minutes * 60 + seconds) * 1000;
+    }
+  }
+
+  // Обработка формата только с минутами (4m)
+  const m2 = msg.match(/retry after (\d+)m/i);
+  if (m2) {
+    const minutes = Number(m2[1]);
+    if (!Number.isNaN(minutes)) {
+      return minutes * 60 * 1000;
+    }
+  }
+
+  // Обработка формата с секундами и миллисекундами (2.9s, 431.9ms)
+  const m3 = msg.match(/retry after (\d+\.?\d*)\s*(s|ms)/i);
+  if (m3) {
+    const value = Number(m3[1]);
+    if (!Number.isNaN(value)) {
+      return m3[2].toLowerCase() === 's' ? value * 1000 : value;
+    }
+  }
+
   return 0;
 }
 
@@ -253,7 +468,7 @@ function getDelayDurationAndStatus(error: unknown): {
   const errorStatus = getErrorStatus(error);
   let delayDurationMs = 0;
 
-  if (errorStatus === 429) {
+  if (errorStatus === 429 || errorStatus === 503) {
     delayDurationMs = getRetryAfterDelayMs(error);
   }
   return { delayDurationMs, errorStatus };
@@ -297,4 +512,85 @@ function logRetryAttempt(
   } else {
     console.warn(message, error); // Default to warn if error type is unknown
   }
+}
+
+/**
+ * Retries a function with exponential backoff and jitter, with the ability to reset the attempt counter on 429 errors.
+ * This is useful for rate limits where a successful retry after the specified delay should start a new series of attempts.
+ * @param fn The asynchronous function to retry.
+ * @param options Optional retry configuration.
+ * @returns A promise that resolves with the result of the function if successful.
+ * @throws The last error encountered if all attempts fail.
+ */
+export async function retryWithBackoffAndResetOn429<T>(
+  fn: () => Promise<T>,
+  options?: Partial<RetryOptions>,
+): Promise<T> {
+  // Используем внутренний счетчик для отслеживания общего числа попыток, если это нужно
+  let totalAttempts = 0;
+  const maxTotalAttempts =
+    options?.maxAttempts || DEFAULT_RETRY_OPTIONS.maxAttempts;
+  const retryDelayBufferPercent =
+    options?.retryDelayBufferPercent ??
+    DEFAULT_RETRY_OPTIONS.retryDelayBufferPercent;
+
+  while (totalAttempts < maxTotalAttempts) {
+    try {
+      // Выполняем основную логику повторных попыток
+      return await retryWithBackoff(fn, options);
+    } catch (error) {
+      totalAttempts++;
+
+      // Проверяем, является ли ошибка 429
+      const errorStatus = getErrorStatus(error);
+      if (errorStatus === 429) {
+        // Сначала пробуем получить задержку из заголовка
+        let { delayDurationMs } = getDelayDurationAndStatus(error);
+
+        // Если заголовок Retry-After отсутствует, пробуем распарсить тело ответа
+        if (delayDurationMs === 0) {
+          const resp = getResponseFromError(error);
+          if (resp && 'text' in resp) {
+            try {
+              // Предполагаем, что у ответа есть метод text()
+              const bodyText = await (
+                resp as { text(): Promise<string> }
+              ).text();
+              // Ищем в тексте тела шаблон, например, "6.25824207s"
+              const match = bodyText.match(/(\d+\.?\d*)s/);
+              if (match) {
+                const seconds = parseFloat(match[1]);
+                if (!isNaN(seconds)) {
+                  delayDurationMs = seconds * 1000;
+                }
+              }
+            } catch (parseError) {
+              console.warn(
+                'Failed to parse response body for retry delay:',
+                parseError,
+              );
+            }
+          }
+        }
+
+        if (delayDurationMs > 0) {
+          const bufferedDelayMs = Math.round(
+            delayDurationMs * (1 + (retryDelayBufferPercent || 0) / 100),
+          );
+          // Сбрасываем логику retryWithBackoff, начиная цикл заново
+          // Это имитирует "сброс" счетчика попыток
+          console.warn(
+            `429 error with delay detected (from header or body). Resetting attempt counter and retrying after ${bufferedDelayMs}ms.`,
+          );
+          await delay(bufferedDelayMs);
+          continue; // Начинаем цикл while заново
+        }
+      }
+
+      // Если это не 429 с задержкой, или достигнуто максимальное количество попыток, пробрасываем ошибку
+      throw error;
+    }
+  }
+
+  throw new Error('Total retry attempts exhausted');
 }

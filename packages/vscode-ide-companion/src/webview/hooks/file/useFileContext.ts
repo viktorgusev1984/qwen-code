@@ -1,6 +1,6 @@
 /**
  * @license
- * Copyright 2025 Qwen Team
+ * Copyright 2025 Gus Qwen Team
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -23,8 +23,9 @@ export const useFileContext = (vscode: VSCodeAPI) => {
     Array<{
       id: string;
       label: string;
-      description: string;
+      description?: string;
       path: string;
+      type: 'file' | 'folder';
     }>
   >([]);
 
@@ -45,7 +46,10 @@ export const useFileContext = (vscode: VSCodeAPI) => {
    */
   const requestWorkspaceFiles = useCallback(
     (query?: string) => {
-      const normalizedQuery = query?.trim();
+      const normalizedQuery = query
+        ?.trim()
+        .replace(/^@/, '')
+        .replace(/\\/g, '/');
 
       // If there's a query, clear previous timer and set up debounce
       if (normalizedQuery && normalizedQuery.length >= 1) {
