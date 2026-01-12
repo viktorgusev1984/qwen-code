@@ -6,21 +6,18 @@
 
 import { useCallback, useMemo, useEffect, useState } from 'react';
 import { type PartListUnion } from '@google/genai';
-import process from 'node:process';
 import type { UseHistoryManagerReturn } from './useHistoryManager.js';
-import type { Config } from '@qwen-code/qwen-code-core';
 import {
+  type Logger,
+  type Config,
   GitService,
-  Logger,
   logSlashCommand,
   makeSlashCommandEvent,
   SlashCommandStatus,
   ToolConfirmationOutcome,
-  Storage,
   IdeClient,
 } from '@qwen-code/qwen-code-core';
 import { useSessionStats } from '../contexts/SessionContext.js';
-import { formatDuration } from '../utils/formatters.js';
 import type {
   Message,
   HistoryItemWithoutId,
@@ -41,6 +38,27 @@ import {
   type ExtensionUpdateStatus,
 } from '../state/extensions.js';
 
+type SerializableHistoryItem = Record<string, unknown>;
+
+function serializeHistoryItemForRecording(
+  item: Omit<HistoryItem, 'id'>,
+): SerializableHistoryItem {
+  const clone: SerializableHistoryItem = { ...item };
+  if ('timestamp' in clone && clone['timestamp'] instanceof Date) {
+    clone['timestamp'] = clone['timestamp'].toISOString();
+  }
+  return clone;
+}
+
+const SLASH_COMMANDS_SKIP_RECORDING = new Set([
+  'quit',
+  'exit',
+  'clear',
+  'reset',
+  'new',
+  'resume',
+]);
+
 interface SlashCommandProcessorActions {
   openAuthDialog: () => void;
   openThemeDialog: () => void;
@@ -48,14 +66,14 @@ interface SlashCommandProcessorActions {
   openSettingsDialog: () => void;
   openModelDialog: () => void;
   openPermissionsDialog: () => void;
+  openApprovalModeDialog: () => void;
+  openResumeDialog: () => void;
   quit: (messages: HistoryItem[]) => void;
   setDebugMessage: (message: string) => void;
-  toggleCorgiMode: () => void;
   dispatchExtensionStateUpdate: (action: ExtensionUpdateAction) => void;
   addConfirmUpdateExtensionRequest: (request: ConfirmationRequest) => void;
   openSubagentCreateDialog: () => void;
   openAgentsManagerDialog: () => void;
-  _showQuitConfirmation: () => void;
 }
 
 /**
@@ -74,8 +92,9 @@ export const useSlashCommandProcessor = (
   actions: SlashCommandProcessorActions,
   extensionsUpdateState: Map<string, ExtensionUpdateStatus>,
   isConfigInitialized: boolean,
+  logger: Logger | null,
 ) => {
-  const session = useSessionStats();
+  const { stats: sessionStats, startNewSession } = useSessionStats();
   const [commands, setCommands] = useState<readonly SlashCommand[]>([]);
   const [reloadTrigger, setReloadTrigger] = useState(0);
 
@@ -94,10 +113,6 @@ export const useSlashCommandProcessor = (
     prompt: React.ReactNode;
     onConfirm: (confirmed: boolean) => void;
   }>(null);
-  const [quitConfirmationRequest, setQuitConfirmationRequest] =
-    useState<null | {
-      onConfirm: (shouldQuit: boolean, action?: string) => void;
-    }>(null);
 
   const [sessionShellAllowlist, setSessionShellAllowlist] = useState(
     new Set<string>(),
@@ -107,16 +122,6 @@ export const useSlashCommandProcessor = (
       return;
     }
     return new GitService(config.getProjectRoot(), config.storage);
-  }, [config]);
-
-  const logger = useMemo(() => {
-    const l = new Logger(
-      config?.getSessionId() || '',
-      config?.storage ?? new Storage(process.cwd()),
-    );
-    // The logger's initialize is async, but we can create the instance
-    // synchronously. Commands that use it will await its initialization.
-    return l;
   }, [config]);
 
   const [pendingItem, setPendingItem] = useState<HistoryItemWithoutId | null>(
@@ -138,13 +143,7 @@ export const useSlashCommandProcessor = (
       if (message.type === MessageType.ABOUT) {
         historyItemContent = {
           type: 'about',
-          cliVersion: message.cliVersion,
-          osVersion: message.osVersion,
-          sandboxEnv: message.sandboxEnv,
-          modelVersion: message.modelVersion,
-          selectedAuthType: message.selectedAuthType,
-          gcpProject: message.gcpProject,
-          ideClient: message.ideClient,
+          systemInfo: message.systemInfo,
         };
       } else if (message.type === MessageType.HELP) {
         historyItemContent = {
@@ -167,11 +166,6 @@ export const useSlashCommandProcessor = (
       } else if (message.type === MessageType.QUIT) {
         historyItemContent = {
           type: 'quit',
-          duration: message.duration,
-        };
-      } else if (message.type === MessageType.QUIT_CONFIRMATION) {
-        historyItemContent = {
-          type: 'quit_confirmation',
           duration: message.duration,
         };
       } else if (message.type === MessageType.COMPRESSION) {
@@ -213,7 +207,6 @@ export const useSlashCommandProcessor = (
         setDebugMessage: actions.setDebugMessage,
         pendingItem,
         setPendingItem,
-        toggleCorgiMode: actions.toggleCorgiMode,
         toggleVimEnabled,
         setGeminiMdFileCount,
         reloadCommands,
@@ -223,8 +216,9 @@ export const useSlashCommandProcessor = (
           actions.addConfirmUpdateExtensionRequest,
       },
       session: {
-        stats: session.stats,
+        stats: sessionStats,
         sessionShellAllowlist,
+        startNewSession,
       },
     }),
     [
@@ -236,7 +230,8 @@ export const useSlashCommandProcessor = (
       addItem,
       clearItems,
       refreshStatic,
-      session.stats,
+      sessionStats,
+      startNewSession,
       actions,
       pendingItem,
       setPendingItem,
@@ -307,10 +302,25 @@ export const useSlashCommandProcessor = (
         return false;
       }
 
+      const recordedItems: Array<Omit<HistoryItem, 'id'>> = [];
+      const recordItem = (item: Omit<HistoryItem, 'id'>) => {
+        recordedItems.push(item);
+      };
+      const addItemWithRecording: UseHistoryManagerReturn['addItem'] = (
+        item,
+        timestamp,
+      ) => {
+        recordItem(item);
+        return addItem(item, timestamp);
+      };
+
       setIsProcessing(true);
 
       const userMessageTimestamp = Date.now();
-      addItem({ type: MessageType.USER, text: trimmed }, userMessageTimestamp);
+      addItemWithRecording(
+        { type: MessageType.USER, text: trimmed },
+        userMessageTimestamp,
+      );
 
       let hasError = false;
       const {
@@ -329,6 +339,10 @@ export const useSlashCommandProcessor = (
           if (commandToExecute.action) {
             const fullCommandContext: CommandContext = {
               ...commandContext,
+              ui: {
+                ...commandContext.ui,
+                addItem: addItemWithRecording,
+              },
               invocation: {
                 raw: trimmed,
                 name: commandToExecute.name,
@@ -402,6 +416,12 @@ export const useSlashCommandProcessor = (
                     case 'subagent_list':
                       actions.openAgentsManagerDialog();
                       return { type: 'handled' };
+                    case 'approval-mode':
+                      actions.openApprovalModeDialog();
+                      return { type: 'handled' };
+                    case 'resume':
+                      actions.openResumeDialog();
+                      return { type: 'handled' };
                     case 'help':
                       return { type: 'handled' };
                     default: {
@@ -420,74 +440,6 @@ export const useSlashCommandProcessor = (
                   });
                   return { type: 'handled' };
                 }
-                case 'quit_confirmation':
-                  // Show quit confirmation dialog instead of immediately quitting
-                  setQuitConfirmationRequest({
-                    onConfirm: (shouldQuit: boolean, action?: string) => {
-                      setQuitConfirmationRequest(null);
-                      if (!shouldQuit) {
-                        // User cancelled the quit operation - do nothing
-                        return;
-                      }
-                      if (shouldQuit) {
-                        if (action === 'save_and_quit') {
-                          // First save conversation with auto-generated tag, then quit
-                          const timestamp = new Date()
-                            .toISOString()
-                            .replace(/[:.]/g, '-');
-                          const autoSaveTag = `auto-save chat ${timestamp}`;
-                          handleSlashCommand(`/chat save "${autoSaveTag}"`);
-                          setTimeout(() => handleSlashCommand('/quit'), 100);
-                        } else if (action === 'summary_and_quit') {
-                          // Generate summary and then quit
-                          handleSlashCommand('/summary')
-                            .then(() => {
-                              // Wait for user to see the summary result
-                              setTimeout(() => {
-                                handleSlashCommand('/quit');
-                              }, 1200);
-                            })
-                            .catch((error) => {
-                              // If summary fails, still quit but show error
-                              addItem(
-                                {
-                                  type: 'error',
-                                  text: `Failed to generate summary before quit: ${
-                                    error instanceof Error
-                                      ? error.message
-                                      : String(error)
-                                  }`,
-                                },
-                                Date.now(),
-                              );
-                              // Give user time to see the error message
-                              setTimeout(() => {
-                                handleSlashCommand('/quit');
-                              }, 1000);
-                            });
-                        } else {
-                          // Just quit immediately - trigger the actual quit action
-                          const now = Date.now();
-                          const { sessionStartTime } = session.stats;
-                          const wallDuration = now - sessionStartTime.getTime();
-
-                          actions.quit([
-                            {
-                              type: 'user',
-                              text: `/quit`,
-                              id: now - 1,
-                            },
-                            {
-                              type: 'quit',
-                              duration: formatDuration(wallDuration),
-                              id: now,
-                            },
-                          ]);
-                        }
-                      }
-                    },
-                  });
-                  return { type: 'handled' };
 
                 case 'quit':
                   actions.quit(result.messages);
@@ -552,7 +504,7 @@ export const useSlashCommandProcessor = (
                   });
 
                   if (!confirmed) {
-                    addItem(
+                    addItemWithRecording(
                       {
                         type: MessageType.INFO,
                         text: 'Operation cancelled.',
@@ -608,7 +560,7 @@ export const useSlashCommandProcessor = (
           });
           logSlashCommand(config, event);
         }
-        addItem(
+        addItemWithRecording(
           {
             type: MessageType.ERROR,
             text: e instanceof Error ? e.message : String(e),
@@ -617,6 +569,38 @@ export const useSlashCommandProcessor = (
         );
         return { type: 'handled' };
       } finally {
+        if (config?.getChatRecordingService) {
+          const chatRecorder = config.getChatRecordingService();
+          const primaryCommand =
+            resolvedCommandPath[0] ||
+            trimmed.replace(/^[/?]/, '').split(/\s+/)[0] ||
+            trimmed;
+          const shouldRecord =
+            !SLASH_COMMANDS_SKIP_RECORDING.has(primaryCommand);
+          try {
+            if (shouldRecord) {
+              chatRecorder?.recordSlashCommand({
+                phase: 'invocation',
+                rawCommand: trimmed,
+              });
+              const outputItems = recordedItems
+                .filter((item) => item.type !== 'user')
+                .map(serializeHistoryItemForRecording);
+              chatRecorder?.recordSlashCommand({
+                phase: 'result',
+                rawCommand: trimmed,
+                outputHistoryItems: outputItems,
+              });
+            }
+          } catch (recordError) {
+            if (config.getDebugMode()) {
+              console.error(
+                '[slashCommand] Failed to record slash command:',
+                recordError,
+              );
+            }
+          }
+        }
         if (config && resolvedCommandPath[0] && !hasError) {
           const event = makeSlashCommandEvent({
             command: resolvedCommandPath[0],
@@ -639,7 +623,6 @@ export const useSlashCommandProcessor = (
       setSessionShellAllowlist,
       setIsProcessing,
       setConfirmationRequest,
-      session.stats,
     ],
   );
 
@@ -650,6 +633,5 @@ export const useSlashCommandProcessor = (
     commandContext,
     shellConfirmationRequest,
     confirmationRequest,
-    quitConfirmationRequest,
   };
 };

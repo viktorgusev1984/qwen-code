@@ -17,7 +17,6 @@ import {
 } from './tool-call-decision.js';
 import type { FileOperation } from './metrics.js';
 export { ToolCallDecision };
-import type { ToolRegistry } from '../tools/tool-registry.js';
 import type { OutputFormat } from '../output/types.js';
 
 export interface BaseTelemetryEvent {
@@ -31,6 +30,7 @@ type CommonFields = keyof BaseTelemetryEvent;
 export class StartSessionEvent implements BaseTelemetryEvent {
   'event.name': 'cli_config';
   'event.timestamp': string;
+  session_id: string;
   model: string;
   embedding_model: string;
   sandbox_enabled: boolean;
@@ -48,9 +48,10 @@ export class StartSessionEvent implements BaseTelemetryEvent {
   mcp_tools?: string;
   output_format: OutputFormat;
 
-  constructor(config: Config, toolRegistry?: ToolRegistry) {
+  constructor(config: Config) {
     const generatorConfig = config.getContentGeneratorConfig();
     const mcpServers = config.getMcpServers();
+    const toolRegistry = config.getToolRegistry();
 
     let useGemini = false;
     let useVertex = false;
@@ -60,6 +61,7 @@ export class StartSessionEvent implements BaseTelemetryEvent {
     }
 
     this['event.name'] = 'cli_config';
+    this.session_id = config.getSessionId();
     this.model = config.getModel();
     this.embedding_model = config.getEmbeddingModel();
     this.sandbox_enabled =
@@ -318,10 +320,20 @@ export class FlashFallbackEvent implements BaseTelemetryEvent {
 export class RipgrepFallbackEvent implements BaseTelemetryEvent {
   'event.name': 'ripgrep_fallback';
   'event.timestamp': string;
+  use_ripgrep: boolean;
+  use_builtin_ripgrep: boolean;
+  error?: string;
 
-  constructor(public error?: string) {
+  constructor(
+    use_ripgrep: boolean,
+    use_builtin_ripgrep: boolean,
+    error?: string,
+  ) {
     this['event.name'] = 'ripgrep_fallback';
     this['event.timestamp'] = new Date().toISOString();
+    this.use_ripgrep = use_ripgrep;
+    this.use_builtin_ripgrep = use_builtin_ripgrep;
+    this.error = error;
   }
 }
 
@@ -686,6 +698,29 @@ export class SubagentExecutionEvent implements BaseTelemetryEvent {
   }
 }
 
+export class AuthEvent implements BaseTelemetryEvent {
+  'event.name': 'auth';
+  'event.timestamp': string;
+  auth_type: AuthType;
+  action_type: 'auto' | 'manual';
+  status: 'success' | 'error' | 'cancelled';
+  error_message?: string;
+
+  constructor(
+    auth_type: AuthType,
+    action_type: 'auto' | 'manual',
+    status: 'success' | 'error' | 'cancelled',
+    error_message?: string,
+  ) {
+    this['event.name'] = 'auth';
+    this['event.timestamp'] = new Date().toISOString();
+    this.auth_type = auth_type;
+    this.action_type = action_type;
+    this.status = status;
+    this.error_message = error_message;
+  }
+}
+
 export type TelemetryEvent =
   | StartSessionEvent
   | EndSessionEvent
@@ -713,7 +748,8 @@ export type TelemetryEvent =
   | ExtensionInstallEvent
   | ExtensionUninstallEvent
   | ToolOutputTruncatedEvent
-  | ModelSlashCommandEvent;
+  | ModelSlashCommandEvent
+  | AuthEvent;
 
 export class ExtensionDisableEvent implements BaseTelemetryEvent {
   'event.name': 'extension_disable';

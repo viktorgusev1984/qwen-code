@@ -7,38 +7,34 @@
 // DISCLAIMER: This is a copied version of https://github.com/googleapis/js-genai/blob/main/src/chats.ts with the intention of working around a key bug
 // where function responses are not treated as "valid" responses: https://b.corp.google.com/issues/420354090
 
-import {
+import type {
   GenerateContentResponse,
-  type Content,
-  type GenerateContentConfig,
-  type SendMessageParameters,
-  type Part,
-  type Tool,
-  FinishReason,
-  ApiError,
+  Content,
+  GenerateContentConfig,
+  SendMessageParameters,
+  Part,
+  Tool,
+  GenerateContentResponseUsageMetadata,
 } from '@google/genai';
-import { toParts } from '../code_assist/converter.js';
-import { createUserContent } from '@google/genai';
+import { ApiError, createUserContent } from '@google/genai';
 import { retryWithBackoff } from '../utils/retry.js';
 import type { Config } from '../config/config.js';
 import {
   DEFAULT_GEMINI_FLASH_MODEL,
   getEffectiveModel,
 } from '../config/models.js';
-import { hasCycleInSchema, MUTATOR_KINDS } from '../tools/tools.js';
+import { hasCycleInSchema } from '../tools/tools.js';
 import type { StructuredError } from './turn.js';
 import {
   logContentRetry,
   logContentRetryFailure,
 } from '../telemetry/loggers.js';
-import { ChatRecordingService } from '../services/chatRecordingService.js';
+import { type ChatRecordingService } from '../services/chatRecordingService.js';
 import {
   ContentRetryEvent,
   ContentRetryFailureEvent,
 } from '../telemetry/types.js';
 import { handleFallback } from '../fallback/handler.js';
-import { isFunctionResponse } from '../utils/messageInspectors.js';
-import { partListUnionToString } from './geminiRequest.js';
 import { uiTelemetryService } from '../telemetry/uiTelemetry.js';
 
 export enum StreamEventType {
@@ -52,16 +48,6 @@ export enum StreamEventType {
 export type StreamEvent =
   | { type: StreamEventType.CHUNK; value: GenerateContentResponse }
   | { type: StreamEventType.RETRY };
-
-interface ResponseTrackerResult {
-  consolidatedParts: Part[];
-  responseText: string;
-}
-
-interface ResponseTracker {
-  handleChunk(chunk: GenerateContentResponse): void;
-  finalize(): ResponseTrackerResult;
-}
 
 /**
  * Options for retrying due to invalid content from the model.
@@ -77,39 +63,6 @@ const INVALID_CONTENT_RETRY_OPTIONS: ContentRetryOptions = {
   maxAttempts: 2, // 1 initial call + 1 retry
   initialDelayMs: 500,
 };
-
-function shouldRetryOnTransientError(error: unknown): boolean {
-  if (error instanceof ApiError && error.message) {
-    if (error.status === 400) return false;
-    if (isSchemaDepthError(error.message)) return false;
-    if (error.status === 429) return true;
-    if (error.status >= 500 && error.status < 600) return true;
-  }
-
-  if (error instanceof Error && error.message) {
-    const normalizedMessage = error.message.toLowerCase();
-    if (normalizedMessage.includes('connection error')) {
-      return true;
-    }
-    if (normalizedMessage.includes('connection timed out')) {
-      return true;
-    }
-    if (normalizedMessage.includes('socket hang up')) {
-      return true;
-    }
-    if (normalizedMessage.includes('econnreset')) {
-      return true;
-    }
-    if (normalizedMessage.includes('fetch failed')) {
-      return true;
-    }
-    if (normalizedMessage.includes('network error')) {
-      return true;
-    }
-  }
-
-  return false;
-}
 /**
  * Returns true if the response is valid, false otherwise.
  *
@@ -139,6 +92,7 @@ export function isValidNonThoughtTextPart(part: Part): boolean {
   return (
     typeof part.text === 'string' &&
     !part.thought &&
+    !part.thoughtSignature &&
     // Technically, the model should never generate parts that have text and
     //  any of these but we don't trust them so check anyways.
     !part.functionCall &&
@@ -156,16 +110,22 @@ function isValidContent(content: Content): boolean {
     if (part === undefined || Object.keys(part).length === 0) {
       return false;
     }
-    if (
-      !part.thought &&
-      part.text !== undefined &&
-      part.text === '' &&
-      part.functionCall === undefined
-    ) {
+    if (!isValidContentPart(part)) {
       return false;
     }
   }
   return true;
+}
+
+function isValidContentPart(part: Part): boolean {
+  const isInvalid =
+    !part.thought &&
+    !part.thoughtSignature &&
+    part.text !== undefined &&
+    part.text === '' &&
+    part.functionCall === undefined;
+
+  return !isInvalid;
 }
 
 /**
@@ -244,55 +204,23 @@ export class GeminiChat {
   // A promise to represent the current state of the message being sent to the
   // model.
   private sendPromise: Promise<void> = Promise.resolve();
-  private pendingSyncStreamEvents: StreamEvent[] = [];
-  private readonly chatRecordingService: ChatRecordingService;
 
+  /**
+   * Creates a new GeminiChat instance.
+   *
+   * @param config - The configuration object.
+   * @param generationConfig - Optional generation configuration.
+   * @param history - Optional initial conversation history.
+   * @param chatRecordingService - Optional recording service. If provided, chat
+   *   messages will be recorded.
+   */
   constructor(
     private readonly config: Config,
     private readonly generationConfig: GenerateContentConfig = {},
     private history: Content[] = [],
+    private readonly chatRecordingService?: ChatRecordingService,
   ) {
     validateHistory(history);
-    this.chatRecordingService = new ChatRecordingService(config);
-    this.chatRecordingService.initialize();
-  }
-
-  private async prepareSend(
-    model: string,
-    params: SendMessageParameters,
-  ): Promise<{ requestContents: Content[]; release: () => void }> {
-    await this.sendPromise;
-
-    let releaseResolver!: () => void;
-    const releasePromise = new Promise<void>((resolve) => {
-      releaseResolver = resolve;
-    });
-    this.sendPromise = releasePromise;
-
-    const userContent = createUserContent(params.message);
-
-    // Record user input - capture complete message with all parts (text, files, images, etc.)
-    // but skip recording function responses (tool call results) as they should be stored in tool call records
-    if (!isFunctionResponse(userContent)) {
-      const userMessage = Array.isArray(params.message)
-        ? params.message
-        : [params.message];
-      const userMessageContent = partListUnionToString(toParts(userMessage));
-      this.chatRecordingService.recordMessage({
-        model,
-        type: 'user',
-        content: userMessageContent,
-      });
-    }
-
-    // Add user content to history ONCE before any attempts.
-    this.history.push(userContent);
-    const requestContents = this.getHistory(true);
-
-    return {
-      requestContents,
-      release: () => releaseResolver?.(),
-    };
   }
 
   setSystemInstruction(sysInstr: string) {
@@ -326,7 +254,19 @@ export class GeminiChat {
     params: SendMessageParameters,
     prompt_id: string,
   ): Promise<AsyncGenerator<StreamEvent>> {
-    const { requestContents, release } = await this.prepareSend(model, params);
+    await this.sendPromise;
+
+    let streamDoneResolver: () => void;
+    const streamDonePromise = new Promise<void>((resolve) => {
+      streamDoneResolver = resolve;
+    });
+    this.sendPromise = streamDonePromise;
+
+    const userContent = createUserContent(params.message);
+
+    // Add user content to history ONCE before any attempts.
+    this.history.push(userContent);
+    const requestContents = this.getHistory(true);
 
     // eslint-disable-next-line @typescript-eslint/no-this-alias
     const self = this;
@@ -339,7 +279,6 @@ export class GeminiChat {
           attempt < INVALID_CONTENT_RETRY_OPTIONS.maxAttempts;
           attempt++
         ) {
-          const tracker = self.createResponseTracker(model);
           try {
             if (attempt > 0) {
               yield { type: StreamEventType.RETRY };
@@ -350,14 +289,12 @@ export class GeminiChat {
               requestContents,
               params,
               prompt_id,
-              tracker,
             );
 
             for await (const chunk of stream) {
               yield { type: StreamEventType.CHUNK, value: chunk };
             }
 
-            tracker.finalize();
             lastError = null;
             break;
           } catch (error) {
@@ -365,6 +302,7 @@ export class GeminiChat {
             const isContentError = error instanceof InvalidStreamError;
 
             if (isContentError) {
+              // Check if we have more attempts left.
               if (attempt < INVALID_CONTENT_RETRY_OPTIONS.maxAttempts - 1) {
                 logContentRetry(
                   self.config,
@@ -403,104 +341,9 @@ export class GeminiChat {
           throw lastError;
         }
       } finally {
-        release();
+        streamDoneResolver!();
       }
     })();
-  }
-
-  async sendMessage(
-    model: string,
-    params: SendMessageParameters,
-    prompt_id: string,
-  ): Promise<GenerateContentResponse> {
-    this.pendingSyncStreamEvents = [];
-    const { requestContents, release } = await this.prepareSend(model, params);
-
-    try {
-      let lastError: unknown = new Error('Request failed after all retries.');
-
-      for (
-        let attempt = 0;
-        attempt < INVALID_CONTENT_RETRY_OPTIONS.maxAttempts;
-        attempt++
-      ) {
-        const tracker = this.createResponseTracker(model);
-        try {
-          const response = await this.makeApiCall(
-            model,
-            requestContents,
-            params,
-            prompt_id,
-          );
-
-          let processedResponse: GenerateContentResponse | undefined;
-          for await (const chunk of this.stopBeforeSecondMutator(
-            (async function* () {
-              yield response;
-            })(),
-          )) {
-            tracker.handleChunk(chunk);
-            processedResponse = chunk;
-          }
-
-          tracker.finalize();
-          lastError = null;
-          return processedResponse ?? response;
-        } catch (error) {
-          lastError = error;
-          const isContentError = error instanceof InvalidStreamError;
-
-          if (isContentError) {
-            if (attempt < INVALID_CONTENT_RETRY_OPTIONS.maxAttempts - 1) {
-              this.pendingSyncStreamEvents.push({
-                type: StreamEventType.RETRY,
-              });
-              logContentRetry(
-                this.config,
-                new ContentRetryEvent(
-                  attempt,
-                  (error as InvalidStreamError).type,
-                  INVALID_CONTENT_RETRY_OPTIONS.initialDelayMs,
-                  model,
-                ),
-              );
-              await new Promise((res) =>
-                setTimeout(
-                  res,
-                  INVALID_CONTENT_RETRY_OPTIONS.initialDelayMs * (attempt + 1),
-                ),
-              );
-              continue;
-            }
-          }
-          break;
-        }
-      }
-
-      if (lastError) {
-        if (lastError instanceof InvalidStreamError) {
-          logContentRetryFailure(
-            this.config,
-            new ContentRetryFailureEvent(
-              INVALID_CONTENT_RETRY_OPTIONS.maxAttempts,
-              (lastError as InvalidStreamError).type,
-              model,
-            ),
-          );
-        }
-        throw lastError;
-      }
-
-      throw new Error('Request failed after all retries.');
-    } finally {
-      release();
-    }
-  }
-
-  drainPendingSyncStreamEvents(): StreamEvent[] {
-    const events = this.pendingSyncStreamEvents;
-    this.pendingSyncStreamEvents = [];
-    return events;
   }
 
   private async makeApiCallAndProcessStream(
@@ -508,7 +351,6 @@ export class GeminiChat {
     requestContents: Content[],
     params: SendMessageParameters,
     prompt_id: string,
-    tracker: ResponseTracker,
   ): Promise<AsyncGenerator<GenerateContentResponse>> {
     const apiCall = () => {
       const modelToUse = getEffectiveModel(
@@ -541,55 +383,20 @@ export class GeminiChat {
     ) => await handleFallback(this.config, model, authType, error);
 
     const streamResponse = await retryWithBackoff(apiCall, {
-      shouldRetryOnError: (error) => shouldRetryOnTransientError(error),
+      shouldRetryOnError: (error: unknown) => {
+        if (error instanceof ApiError && error.message) {
+          if (error.status === 400) return false;
+          if (isSchemaDepthError(error.message)) return false;
+          if (error.status === 429) return true;
+          if (error.status >= 500 && error.status < 600) return true;
+        }
+        return false;
+      },
       onPersistent429: onPersistent429Callback,
       authType: this.config.getContentGeneratorConfig()?.authType,
     });
 
-    return this.processStreamResponse(streamResponse, tracker);
-  }
-
-  private async makeApiCall(
-    model: string,
-    requestContents: Content[],
-    params: SendMessageParameters,
-    prompt_id: string,
-  ): Promise<GenerateContentResponse> {
-    const apiCall = () => {
-      const modelToUse = getEffectiveModel(
-        this.config.isInFallbackMode(),
-        model,
-      );
-
-      if (
-        this.config.getQuotaErrorOccurred() &&
-        modelToUse === DEFAULT_GEMINI_FLASH_MODEL
-      ) {
-        throw new Error(
-          'Please submit a new query to continue with the Flash model.',
-        );
-      }
-
-      return this.config.getContentGenerator().generateContent(
-        {
-          model: modelToUse,
-          contents: requestContents,
-          config: { ...this.generationConfig, ...params.config },
-        },
-        prompt_id,
-      );
-    };
-
-    const onPersistent429Callback = async (
-      authType?: string,
-      error?: unknown,
-    ) => await handleFallback(this.config, model, authType, error);
-
-    return retryWithBackoff(apiCall, {
-      shouldRetryOnError: (error) => shouldRetryOnTransientError(error),
-      onPersistent429: onPersistent429Callback,
-      authType: this.config.getContentGeneratorConfig()?.authType,
-    });
+    return this.processStreamResponse(model, streamResponse);
   }
 
   /**
@@ -643,108 +450,46 @@ export class GeminiChat {
   }
 
   stripThoughtsFromHistory(): void {
-    this.history = this.history.map((content) => {
-      const newContent = { ...content };
-      if (newContent.parts) {
-        newContent.parts = newContent.parts.map((part) => {
-          if (part && typeof part === 'object' && 'thoughtSignature' in part) {
-            const newPart = { ...part };
-            delete (newPart as { thoughtSignature?: string }).thoughtSignature;
-            return newPart;
-          }
-          return part;
-        });
-      }
-      return newContent;
-    });
+    this.history = this.history
+      .map((content) => {
+        if (!content.parts) return content;
+
+        // Filter out thought parts entirely
+        const filteredParts = content.parts
+          .filter(
+            (part) =>
+              !(
+                part &&
+                typeof part === 'object' &&
+                'thought' in part &&
+                part.thought
+              ),
+          )
+          .map((part) => {
+            if (
+              part &&
+              typeof part === 'object' &&
+              'thoughtSignature' in part
+            ) {
+              const newPart = { ...part };
+              delete (newPart as { thoughtSignature?: string })
+                .thoughtSignature;
+              return newPart;
+            }
+            return part;
+          });
+
+        return {
+          ...content,
+          parts: filteredParts,
+        };
+      })
+      // Remove Content objects that have no parts left after filtering
+      .filter((content) => content.parts && content.parts.length > 0);
   }
 
   setTools(tools: Tool[]): void {
     this.generationConfig.tools = tools;
-  }
-
-  private createResponseTracker(model: string): ResponseTracker {
-    const modelResponseParts: Part[] = [];
-    let hasToolCall = false;
-    let lastChunkHasFinishReason = false;
-
-    return {
-      handleChunk: (chunk: GenerateContentResponse) => {
-        lastChunkHasFinishReason =
-          chunk?.candidates?.some((candidate) => candidate.finishReason) ?? false;
-        if (isValidResponse(chunk)) {
-          const content = chunk.candidates?.[0]?.content;
-          if (content?.parts) {
-            if (content.parts.some((part) => part.thought)) {
-              this.recordThoughtFromContent(content);
-            }
-            if (content.parts.some((part) => part.functionCall)) {
-              hasToolCall = true;
-            }
-
-            modelResponseParts.push(
-              ...content.parts.filter((part) => !part.thought),
-            );
-          }
-        }
-
-        if (chunk.usageMetadata) {
-          this.chatRecordingService.recordMessageTokens(chunk.usageMetadata);
-          if (chunk.usageMetadata.promptTokenCount !== undefined) {
-            uiTelemetryService.setLastPromptTokenCount(
-              chunk.usageMetadata.promptTokenCount,
-            );
-          }
-        }
-      },
-      finalize: (): ResponseTrackerResult => {
-        const consolidatedParts: Part[] = [];
-        for (const part of modelResponseParts) {
-          const lastPart = consolidatedParts[consolidatedParts.length - 1];
-          if (
-            lastPart?.text &&
-            isValidNonThoughtTextPart(lastPart) &&
-            isValidNonThoughtTextPart(part)
-          ) {
-            lastPart.text += part.text;
-          } else {
-            consolidatedParts.push(part);
-          }
-        }
-
-        const responseText = consolidatedParts
-          .filter((part) => part.text)
-          .map((part) => part.text)
-          .join('')
-          .trim();
-
-        if (responseText) {
-          this.chatRecordingService.recordMessage({
-            model,
-            type: 'qwen',
-            content: responseText,
-          });
-        }
-
-        if (!hasToolCall && (!lastChunkHasFinishReason || !responseText)) {
-          if (!lastChunkHasFinishReason) {
-            throw new InvalidStreamError(
-              'Model stream ended without a finish reason.',
-              'NO_FINISH_REASON',
-            );
-          } else {
-            throw new InvalidStreamError(
-              'Model stream ended with empty response text.',
-              'NO_RESPONSE_TEXT',
-            );
-          }
-        }
-
-        this.history.push({ role: 'model', parts: consolidatedParts });
-
-        return { consolidatedParts, responseText };
-      },
-    };
   }
 
   async maybeIncludeSchemaDepthContext(error: StructuredError): Promise<void> {
@@ -776,103 +521,121 @@ export class GeminiChat {
   }
 
   private async *processStreamResponse(
+    model: string,
     streamResponse: AsyncGenerator<GenerateContentResponse>,
-    tracker: ResponseTracker,
   ): AsyncGenerator<GenerateContentResponse> {
-    for await (const chunk of this.stopBeforeSecondMutator(streamResponse)) {
-      tracker.handleChunk(chunk);
-      yield chunk;
+    // Collect ALL parts from the model response (including thoughts for recording)
+    const allModelParts: Part[] = [];
+    let usageMetadata: GenerateContentResponseUsageMetadata | undefined;
+
+    let hasToolCall = false;
+    let hasFinishReason = false;
+
+    for await (const chunk of streamResponse) {
+      hasFinishReason =
+        chunk?.candidates?.some((candidate) => candidate.finishReason) ?? false;
+      if (isValidResponse(chunk)) {
+        const content = chunk.candidates?.[0]?.content;
+        if (content?.parts) {
+          if (content.parts.some((part) => part.functionCall)) {
+            hasToolCall = true;
+          }
+
+          // Collect all parts for recording
+          allModelParts.push(...content.parts);
+        }
+      }
+
+      // Collect token usage for consolidated recording
+      if (chunk.usageMetadata) {
+        usageMetadata = chunk.usageMetadata;
+        if (chunk.usageMetadata.promptTokenCount !== undefined) {
+          uiTelemetryService.setLastPromptTokenCount(
+            chunk.usageMetadata.promptTokenCount,
+          );
+        }
+      }
+
+      yield chunk; // Yield every chunk to the UI immediately.
     }
-  }
 
-  /**
-   * Gets the chat recording service instance.
-   */
-  getChatRecordingService(): ChatRecordingService {
-    return this.chatRecordingService;
-  }
-
-  /**
-   * Extracts and records thought from thought content.
-   */
-  private recordThoughtFromContent(content: Content): void {
-    if (!content.parts || content.parts.length === 0) {
-      return;
+    let thoughtText = '';
+    // Only include thoughts if not using summarized thinking.
+    if (!this.config.getContentGenerator().useSummarizedThinking()) {
+      thoughtText = allModelParts
+        .filter((part) => part.thought)
+        .map((part) => part.text)
+        .join('')
+        .trim();
     }
 
-    const thoughtPart = content.parts[0];
-    if (thoughtPart.text) {
-      // Extract subject and description using the same logic as turn.ts
-      const rawText = thoughtPart.text;
-      const subjectStringMatches = rawText.match(/\*\*(.*?)\*\*/s);
-      const subject = subjectStringMatches
-        ? subjectStringMatches[1].trim()
-        : '';
-      const description = rawText.replace(/\*\*(.*?)\*\*/s, '').trim();
+    const contentParts = allModelParts.filter((part) => !part.thought);
+    const consolidatedHistoryParts: Part[] = [];
+    for (const part of contentParts) {
+      const lastPart =
+        consolidatedHistoryParts[consolidatedHistoryParts.length - 1];
+      if (
+        lastPart?.text &&
+        isValidNonThoughtTextPart(lastPart) &&
+        isValidNonThoughtTextPart(part)
+      ) {
+        lastPart.text += part.text;
+      } else if (isValidContentPart(part)) {
+        consolidatedHistoryParts.push(part);
+      }
+    }
 
-      this.chatRecordingService.recordThought({
-        subject,
-        description,
+    const contentText = consolidatedHistoryParts
+      .filter((part) => part.text)
+      .map((part) => part.text)
+      .join('')
+      .trim();
+
+    // Record assistant turn with raw Content and metadata
+    if (thoughtText || contentText || hasToolCall || usageMetadata) {
+      this.chatRecordingService?.recordAssistantTurn({
+        model,
+        message: [
+          ...(thoughtText ? [{ text: thoughtText, thought: true }] : []),
+          ...(contentText ? [{ text: contentText }] : []),
+          ...(hasToolCall
+            ? contentParts
+                .filter((part) => part.functionCall)
+                .map((part) => ({ functionCall: part.functionCall }))
+            : []),
+        ],
+        tokens: usageMetadata,
       });
     }
-  }
 
-  /**
-   * Truncates the chunkStream right before the second function call to a
-   * function that mutates state. This may involve trimming parts from a chunk
-   * as well as omtting some chunks altogether.
-   *
-   * We do this because it improves tool call quality if the model gets
-   * feedback from one mutating function call before it makes the next one.
-   */
-  private async *stopBeforeSecondMutator(
-    chunkStream: AsyncGenerator<GenerateContentResponse>,
-  ): AsyncGenerator<GenerateContentResponse> {
-    let foundMutatorFunctionCall = false;
-
-    for await (const chunk of chunkStream) {
-      const candidate = chunk.candidates?.[0];
-      const content = candidate?.content;
-      if (!candidate || !content?.parts) {
-        yield chunk;
-        continue;
+    // Stream validation logic: A stream is considered successful if:
+    // 1. There's a tool call (tool calls can end without explicit finish reasons), OR
+    // 2. There's a finish reason AND we have non-empty response text
+    //
+    // We throw an error only when there's no tool call AND:
+    // - No finish reason, OR
+    // - Empty response text (e.g., only thoughts with no actual content)
+    if (!hasToolCall && (!hasFinishReason || !contentText)) {
+      if (!hasFinishReason) {
+        throw new InvalidStreamError(
+          'Model stream ended without a finish reason.',
+          'NO_FINISH_REASON',
+        );
+      } else {
+        throw new InvalidStreamError(
+          'Model stream ended with empty response text.',
+          'NO_RESPONSE_TEXT',
+        );
       }
-
-      const truncatedParts: Part[] = [];
-      for (const part of content.parts) {
-        if (this.isMutatorFunctionCall(part)) {
-          if (foundMutatorFunctionCall) {
-            // This is the second mutator call.
-            // Truncate and return immedaitely.
-            const newChunk = new GenerateContentResponse();
-            newChunk.candidates = [
-              {
-                ...candidate,
-                content: {
-                  ...content,
-                  parts: truncatedParts,
-                },
-                finishReason: FinishReason.STOP,
-              },
-            ];
-            yield newChunk;
-            return;
-          }
-          foundMutatorFunctionCall = true;
-        }
-        truncatedParts.push(part);
-      }
-
-      yield chunk;
     }
-  }
 
-  private isMutatorFunctionCall(part: Part): boolean {
-    if (!part?.functionCall?.name) {
-      return false;
-    }
-    const tool = this.config.getToolRegistry().getTool(part.functionCall.name);
-    return !!tool && MUTATOR_KINDS.includes(tool.kind);
+    this.history.push({
+      role: 'model',
+      parts: [
+        ...(thoughtText ? [{ text: thoughtText, thought: true }] : []),
+        ...consolidatedHistoryParts,
+      ],
+    });
   }
 }
 

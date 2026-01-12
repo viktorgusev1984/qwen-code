@@ -1,8 +1,13 @@
 import OpenAI from 'openai';
+import type { GenerateContentConfig } from '@google/genai';
 import type { Config } from '../../../config/config.js';
 import type { ContentGeneratorConfig } from '../../contentGenerator.js';
 import { AuthType } from '../../contentGenerator.js';
-import { DEFAULT_TIMEOUT, DEFAULT_MAX_RETRIES } from '../constants.js';
+import {
+  DEFAULT_TIMEOUT,
+  DEFAULT_MAX_RETRIES,
+  DEFAULT_DASHSCOPE_BASE_URL,
+} from '../constants.js';
 import { tokenLimit } from '../../tokenLimits.js';
 import type {
   OpenAICompatibleProvider,
@@ -53,7 +58,7 @@ export class DashScopeOpenAICompatibleProvider
   buildClient(): OpenAI {
     const {
       apiKey,
-      baseUrl,
+      baseUrl = DEFAULT_DASHSCOPE_BASE_URL,
       timeout = DEFAULT_TIMEOUT,
       maxRetries = DEFAULT_MAX_RETRIES,
     } = this.contentGeneratorConfig;
@@ -126,11 +131,22 @@ export class DashScopeOpenAICompatibleProvider
   }
 
   buildMetadata(userPromptId: string): DashScopeRequestMetadata {
+    const channel = this.cliConfig.getChannel?.();
+
     return {
       metadata: {
         sessionId: this.cliConfig.getSessionId?.(),
         promptId: userPromptId,
+        ...(channel ? { channel } : {}),
       },
+    };
+  }
+
+  getDefaultGenerationConfig(): GenerateContentConfig {
+    return {
+      temperature: 0.7,
+      topP: 0.8,
+      topK: 20,
     };
   }
 

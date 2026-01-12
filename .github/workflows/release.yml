@@ -133,8 +133,8 @@ jobs:
           ${{ github.event.inputs.force_skip_tests != 'true' }}
         run: |
           npm run preflight
-          npm run test:integration:sandbox:none
-          npm run test:integration:sandbox:docker
+          npm run test:integration:cli:sandbox:none
+          npm run test:integration:cli:sandbox:docker
         env:
           OPENAI_API_KEY: '${{ secrets.OPENAI_API_KEY }}'
           OPENAI_BASE_URL: '${{ secrets.OPENAI_BASE_URL }}'
@@ -167,7 +167,11 @@ jobs:
           RELEASE_TAG: '${{ steps.version.outputs.RELEASE_TAG }}'
         run: |-
           git add package.json package-lock.json packages/*/package.json
-          git commit -m "chore(release): ${RELEASE_TAG}"
+          if git diff --staged --quiet; then
+            echo "No version changes to commit"
+          else
+            git commit -m "chore(release): ${RELEASE_TAG}"
+          fi
           if [[ "${IS_DRY_RUN}" == "false" ]]; then
             echo "Pushing release branch to remote..."
             git push --set-upstream origin "${BRANCH_NAME}" --follow-tags
@@ -220,5 +224,4 @@ jobs:
         run: |-
           gh issue create \
             --title "Release Failed for ${RELEASE_TAG} on $(date +'%Y-%m-%d')" \
-            --body "The release workflow failed. See the full run for details: ${DETAILS_URL}" \
-            --label "kind/bug,release-failure"
+            --body "The release workflow failed. See the full run for details: ${DETAILS_URL}"

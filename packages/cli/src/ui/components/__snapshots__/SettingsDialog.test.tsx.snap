@@ -10,9 +10,11 @@ exports[`SettingsDialog > Snapshot Tests > should render default state correctly
 │                                                                                                  │
 │   Disable Auto Update                                  false                                     │
 │                                                                                                  │
-│   Enable Prompt Completion                             false                                     │
-│                                                                                                  │
 │   Debug Keystroke Logging                              false                                     │
+│                                                                                                  │
+│   Language                                             Auto (detect from system)                 │
+│                                                                                                  │
+│   Terminal Bell                                        true                                      │
 │                                                                                                  │
 │   Output Format                                        Text                                      │
 │                                                                                                  │
@@ -20,15 +22,12 @@ exports[`SettingsDialog > Snapshot Tests > should render default state correctly
 │                                                                                                  │
 │   Show Status in Title                                 false                                     │
 │                                                                                                  │
-│   Hide Tips                                            false                                     │
-│                                                                                                  │
 │ ▼                                                                                                │
 │                                                                                                  │
 │                                                                                                  │
 │   Apply To                                                                                       │
 │ ● User Settings                                                                                  │
 │   Workspace Settings                                                                             │
-│   System Settings                                                                                │
 │                                                                                                  │
 │ (Use Enter to select, Tab to change focus)                                                       │
 │                                                                                                  │
@@ -45,9 +44,11 @@ exports[`SettingsDialog > Snapshot Tests > should render focused on scope select
 │                                                                                                  │
 │   Disable Auto Update                                  false                                     │
 │                                                                                                  │
-│   Enable Prompt Completion                             false                                     │
-│                                                                                                  │
 │   Debug Keystroke Logging                              false                                     │
+│                                                                                                  │
+│   Language                                             Auto (detect from system)                 │
+│                                                                                                  │
+│   Terminal Bell                                        true                                      │
 │                                                                                                  │
 │   Output Format                                        Text                                      │
 │                                                                                                  │
@@ -55,15 +56,12 @@ exports[`SettingsDialog > Snapshot Tests > should render focused on scope select
 │                                                                                                  │
 │   Show Status in Title                                 false                                     │
 │                                                                                                  │
-│   Hide Tips                                            false                                     │
-│                                                                                                  │
 │ ▼                                                                                                │
 │                                                                                                  │
 │                                                                                                  │
 │   Apply To                                                                                       │
 │ ● User Settings                                                                                  │
 │   Workspace Settings                                                                             │
-│   System Settings                                                                                │
 │                                                                                                  │
 │ (Use Enter to select, Tab to change focus)                                                       │
 │                                                                                                  │
@@ -80,9 +78,11 @@ exports[`SettingsDialog > Snapshot Tests > should render with accessibility sett
 │                                                                                                  │
 │   Disable Auto Update                                  false                                     │
 │                                                                                                  │
-│   Enable Prompt Completion                             false                                     │
-│                                                                                                  │
 │   Debug Keystroke Logging                              false                                     │
+│                                                                                                  │
+│   Language                                             Auto (detect from system)                 │
+│                                                                                                  │
+│   Terminal Bell                                        true                                      │
 │                                                                                                  │
 │   Output Format                                        Text                                      │
 │                                                                                                  │
@@ -90,15 +90,12 @@ exports[`SettingsDialog > Snapshot Tests > should render with accessibility sett
 │                                                                                                  │
 │   Show Status in Title                                 false                                     │
 │                                                                                                  │
-│   Hide Tips                                            false                                     │
-│                                                                                                  │
 │ ▼                                                                                                │
 │                                                                                                  │
 │                                                                                                  │
 │   Apply To                                                                                       │
 │ ● User Settings                                                                                  │
 │   Workspace Settings                                                                             │
-│   System Settings                                                                                │
 │                                                                                                  │
 │ (Use Enter to select, Tab to change focus)                                                       │
 │                                                                                                  │
@@ -115,9 +112,11 @@ exports[`SettingsDialog > Snapshot Tests > should render with all boolean settin
 │                                                                                                  │
 │   Disable Auto Update                                  false*                                    │
 │                                                                                                  │
-│   Enable Prompt Completion                             false*                                    │
-│                                                                                                  │
 │   Debug Keystroke Logging                              false*                                    │
+│                                                                                                  │
+│   Language                                             Auto (detect from system)                 │
+│                                                                                                  │
+│   Terminal Bell                                        true                                      │
 │                                                                                                  │
 │   Output Format                                        Text                                      │
 │                                                                                                  │
@@ -125,15 +124,12 @@ exports[`SettingsDialog > Snapshot Tests > should render with all boolean settin
 │                                                                                                  │
 │   Show Status in Title                                 false                                     │
 │                                                                                                  │
-│   Hide Tips                                            false*                                    │
-│                                                                                                  │
 │ ▼                                                                                                │
 │                                                                                                  │
 │                                                                                                  │
 │   Apply To                                                                                       │
 │ ● User Settings                                                                                  │
 │   Workspace Settings                                                                             │
-│   System Settings                                                                                │
 │                                                                                                  │
 │ (Use Enter to select, Tab to change focus)                                                       │
 │                                                                                                  │
@@ -150,9 +146,11 @@ exports[`SettingsDialog > Snapshot Tests > should render with different scope se
 │                                                                                                  │
 │   Disable Auto Update (Modified in System)             false                                     │
 │                                                                                                  │
-│   Enable Prompt Completion                             false                                     │
-│                                                                                                  │
 │   Debug Keystroke Logging                              false                                     │
+│                                                                                                  │
+│   Language                                             Auto (detect from system)                 │
+│                                                                                                  │
+│   Terminal Bell                                        true                                      │
 │                                                                                                  │
 │   Output Format                                        Text                                      │
 │                                                                                                  │
@@ -160,15 +158,12 @@ exports[`SettingsDialog > Snapshot Tests > should render with different scope se
 │                                                                                                  │
 │   Show Status in Title                                 false                                     │
 │                                                                                                  │
-│   Hide Tips                                            false                                     │
-│                                                                                                  │
 │ ▼                                                                                                │
 │                                                                                                  │
 │                                                                                                  │
 │   Apply To                                                                                       │
 │ ● User Settings                                                                                  │
 │   Workspace Settings                                                                             │
-│   System Settings                                                                                │
 │                                                                                                  │
 │ (Use Enter to select, Tab to change focus)                                                       │
 │                                                                                                  │
@@ -185,9 +180,11 @@ exports[`SettingsDialog > Snapshot Tests > should render with different scope se
 │                                                                                                  │
 │   Disable Auto Update                                  false                                     │
 │                                                                                                  │
-│   Enable Prompt Completion                             false                                     │
-│                                                                                                  │
 │   Debug Keystroke Logging (Modified in Workspace)      false                                     │
+│                                                                                                  │
+│   Language                                             Auto (detect from system)                 │
+│                                                                                                  │
+│   Terminal Bell                                        true                                      │
 │                                                                                                  │
 │   Output Format                                        Text                                      │
 │                                                                                                  │
@@ -195,15 +192,12 @@ exports[`SettingsDialog > Snapshot Tests > should render with different scope se
 │                                                                                                  │
 │   Show Status in Title                                 false                                     │
 │                                                                                                  │
-│   Hide Tips                                            false                                     │
-│                                                                                                  │
 │ ▼                                                                                                │
 │                                                                                                  │
 │                                                                                                  │
 │   Apply To                                                                                       │
 │ ● User Settings                                                                                  │
 │   Workspace Settings                                                                             │
-│   System Settings                                                                                │
 │                                                                                                  │
 │ (Use Enter to select, Tab to change focus)                                                       │
 │                                                                                                  │
@@ -220,9 +214,11 @@ exports[`SettingsDialog > Snapshot Tests > should render with file filtering set
 │                                                                                                  │
 │   Disable Auto Update                                  false                                     │
 │                                                                                                  │
-│   Enable Prompt Completion                             false                                     │
-│                                                                                                  │
 │   Debug Keystroke Logging                              false                                     │
+│                                                                                                  │
+│   Language                                             Auto (detect from system)                 │
+│                                                                                                  │
+│   Terminal Bell                                        true                                      │
 │                                                                                                  │
 │   Output Format                                        Text                                      │
 │                                                                                                  │
@@ -230,15 +226,12 @@ exports[`SettingsDialog > Snapshot Tests > should render with file filtering set
 │                                                                                                  │
 │   Show Status in Title                                 false                                     │
 │                                                                                                  │
-│   Hide Tips                                            false                                     │
-│                                                                                                  │
 │ ▼                                                                                                │
 │                                                                                                  │
 │                                                                                                  │
 │   Apply To                                                                                       │
 │ ● User Settings                                                                                  │
 │   Workspace Settings                                                                             │
-│   System Settings                                                                                │
 │                                                                                                  │
 │ (Use Enter to select, Tab to change focus)                                                       │
 │                                                                                                  │
@@ -255,9 +248,11 @@ exports[`SettingsDialog > Snapshot Tests > should render with mixed boolean and 
 │                                                                                                  │
 │   Disable Auto Update                                  true*                                     │
 │                                                                                                  │
-│   Enable Prompt Completion                             false                                     │
-│                                                                                                  │
 │   Debug Keystroke Logging                              false                                     │
+│                                                                                                  │
+│   Language                                             Auto (detect from system)                 │
+│                                                                                                  │
+│   Terminal Bell                                        true                                      │
 │                                                                                                  │
 │   Output Format                                        Text                                      │
 │                                                                                                  │
@@ -265,15 +260,12 @@ exports[`SettingsDialog > Snapshot Tests > should render with mixed boolean and 
 │                                                                                                  │
 │   Show Status in Title                                 false                                     │
 │                                                                                                  │
-│   Hide Tips                                            false                                     │
-│                                                                                                  │
 │ ▼                                                                                                │
 │                                                                                                  │
 │                                                                                                  │
 │   Apply To                                                                                       │
 │ ● User Settings                                                                                  │
 │   Workspace Settings                                                                             │
-│   System Settings                                                                                │
 │                                                                                                  │
 │ (Use Enter to select, Tab to change focus)                                                       │
 │                                                                                                  │
@@ -290,9 +282,11 @@ exports[`SettingsDialog > Snapshot Tests > should render with tools and security
 │                                                                                                  │
 │   Disable Auto Update                                  false                                     │
 │                                                                                                  │
-│   Enable Prompt Completion                             false                                     │
-│                                                                                                  │
 │   Debug Keystroke Logging                              false                                     │
+│                                                                                                  │
+│   Language                                             Auto (detect from system)                 │
+│                                                                                                  │
+│   Terminal Bell                                        true                                      │
 │                                                                                                  │
 │   Output Format                                        Text                                      │
 │                                                                                                  │
@@ -300,15 +294,12 @@ exports[`SettingsDialog > Snapshot Tests > should render with tools and security
 │                                                                                                  │
 │   Show Status in Title                                 false                                     │
 │                                                                                                  │
-│   Hide Tips                                            false                                     │
-│                                                                                                  │
 │ ▼                                                                                                │
 │                                                                                                  │
 │                                                                                                  │
 │   Apply To                                                                                       │
 │ ● User Settings                                                                                  │
 │   Workspace Settings                                                                             │
-│   System Settings                                                                                │
 │                                                                                                  │
 │ (Use Enter to select, Tab to change focus)                                                       │
 │                                                                                                  │
@@ -325,9 +316,11 @@ exports[`SettingsDialog > Snapshot Tests > should render with various boolean se
 │                                                                                                  │
 │   Disable Auto Update                                  true*                                     │
 │                                                                                                  │
-│   Enable Prompt Completion                             true*                                     │
-│                                                                                                  │
 │   Debug Keystroke Logging                              true*                                     │
+│                                                                                                  │
+│   Language                                             Auto (detect from system)                 │
+│                                                                                                  │
+│   Terminal Bell                                        true                                      │
 │                                                                                                  │
 │   Output Format                                        Text                                      │
 │                                                                                                  │
@@ -335,15 +328,12 @@ exports[`SettingsDialog > Snapshot Tests > should render with various boolean se
 │                                                                                                  │
 │   Show Status in Title                                 false                                     │
 │                                                                                                  │
-│   Hide Tips                                            true*                                     │
-│                                                                                                  │
 │ ▼                                                                                                │
 │                                                                                                  │
 │                                                                                                  │
 │   Apply To                                                                                       │
 │ ● User Settings                                                                                  │
 │   Workspace Settings                                                                             │
-│   System Settings                                                                                │
 │                                                                                                  │
 │ (Use Enter to select, Tab to change focus)                                                       │
 │                                                                                                  │

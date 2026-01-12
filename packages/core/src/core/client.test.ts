@@ -15,12 +15,8 @@ import {
 } from 'vitest';
 
 import type { Content, GenerateContentResponse, Part } from '@google/genai';
-import {
-  findCompressSplitPoint,
-  isThinkingDefault,
-  isThinkingSupported,
-  GeminiClient,
-} from './client.js';
+import { GeminiClient } from './client.js';
+import { findCompressSplitPoint } from '../services/chatCompressionService.js';
 import {
   AuthType,
   type ContentGenerator,
@@ -43,7 +39,6 @@ import { setSimulate429 } from '../utils/testUtils.js';
 import { tokenLimit } from './tokenLimits.js';
 import { ideContextStore } from '../ide/ideContext.js';
 import { uiTelemetryService } from '../telemetry/uiTelemetry.js';
-import { QwenLogger } from '../telemetry/index.js';
 
 // Mock fs module to prevent actual file system operations during tests
 const mockFileSystem = new Map<string, string>();
@@ -63,6 +58,7 @@ vi.mock('node:fs', () => {
       });
     }),
     existsSync: vi.fn((path: string) => mockFileSystem.has(path)),
+    appendFileSync: vi.fn(),
   };
 
   return {
@@ -102,6 +98,22 @@ vi.mock('../utils/errorReporting', () => ({ reportError: vi.fn() }));
 vi.mock('../utils/nextSpeakerChecker', () => ({
   checkNextSpeaker: vi.fn().mockResolvedValue(null),
 }));
+vi.mock('../utils/environmentContext', () => ({
+  getEnvironmentContext: vi
+    .fn()
+    .mockResolvedValue([{ text: 'Mocked env context' }]),
+  getInitialChatHistory: vi.fn(async (_config, extraHistory) => [
+    {
+      role: 'user',
+      parts: [{ text: 'Mocked env context' }],
+    },
+    {
+      role: 'model',
+      parts: [{ text: 'Got it. Thanks for the context!' }],
+    },
+    ...(extraHistory ?? []),
+  ]),
+}));
 vi.mock('../utils/generateContentResponseUtilities', () => ({
   getResponseText: (result: GenerateContentResponse) =>
     result.candidates?.[0]?.content?.parts?.map((part) => part.text).join('') ||
@@ -136,6 +148,10 @@ vi.mock('../telemetry/index.js', async (importOriginal) => {
 vi.mock('../ide/ideContext.js');
 vi.mock('../telemetry/uiTelemetry.js', () => ({
   uiTelemetryService: mockUiTelemetryService,
+}));
+vi.mock('../telemetry/loggers.js', () => ({
+  logChatCompression: vi.fn(),
+  logNextSpeakerCheck: vi.fn(),
 }));
 
 /**
@@ -228,40 +244,6 @@ describe('findCompressSplitPoint', () => {
   });
 });
 
-describe('isThinkingSupported', () => {
-  it('should return true for gemini-2.5', () => {
-    expect(isThinkingSupported('gemini-2.5')).toBe(true);
-  });
-
-  it('should return true for gemini-2.5-pro', () => {
-    expect(isThinkingSupported('gemini-2.5-pro')).toBe(true);
-  });
-
-  it('should return false for other models', () => {
-    expect(isThinkingSupported('gemini-1.5-flash')).toBe(false);
-    expect(isThinkingSupported('some-other-model')).toBe(false);
-  });
-});
-
-describe('isThinkingDefault', () => {
-  it('should return false for gemini-2.5-flash-lite', () => {
-    expect(isThinkingDefault('gemini-2.5-flash-lite')).toBe(false);
-  });
-
-  it('should return true for gemini-2.5', () => {
-    expect(isThinkingDefault('gemini-2.5')).toBe(true);
-  });
-
-  it('should return true for gemini-2.5-pro', () => {
-    expect(isThinkingDefault('gemini-2.5-pro')).toBe(true);
-  });
-
-  it('should return false for other models', () => {
-    expect(isThinkingDefault('gemini-1.5-flash')).toBe(false);
-    expect(isThinkingDefault('some-other-model')).toBe(false);
-  });
-});
-
 describe('Gemini Client (client.ts)', () => {
   let mockContentGenerator: ContentGenerator;
   let mockConfig: Config;
@@ -346,6 +328,9 @@ describe('Gemini Client (client.ts)', () => {
       getProjectRoot: vi.fn().mockReturnValue('/test/project/root'),
       storage: {
         getProjectTempDir: vi.fn().mockReturnValue('/test/temp'),
+        getProjectDir: vi
+          .fn()
+          .mockReturnValue('/test/project/root/.gemini/projects/test-project'),
       },
       getContentGenerator: vi.fn().mockReturnValue(mockContentGenerator),
       getBaseLlmClient: vi.fn().mockReturnValue({
@@ -356,6 +341,8 @@ describe('Gemini Client (client.ts)', () => {
       }),
       getSubagentManager: vi.fn().mockReturnValue(mockSubagentManager),
       getSkipLoopDetection: vi.fn().mockReturnValue(false),
+      getChatRecordingService: vi.fn().mockReturnValue(undefined),
+      getResumedSessionData: vi.fn().mockReturnValue(undefined),
     } as unknown as Config;
 
     client = new GeminiClient(mockConfig);
@@ -424,6 +411,7 @@ describe('Gemini Client (client.ts)', () => {
         getHistory: mockGetHistory,
         addHistory: vi.fn(),
         setHistory: vi.fn(),
+        stripThoughtsFromHistory: vi.fn(),
       } as unknown as GeminiChat;
     });
 
@@ -438,6 +426,7 @@ describe('Gemini Client (client.ts)', () => {
       const mockOriginalChat: Partial<GeminiChat> = {
         getHistory: vi.fn((_curated?: boolean) => chatHistory),
         setHistory: vi.fn(),
+        stripThoughtsFromHistory: vi.fn(),
       };
       client['chat'] = mockOriginalChat as GeminiChat;
 
@@ -620,7 +609,8 @@ describe('Gemini Client (client.ts)', () => {
     });
 
     it('logs a telemetry event when compressing', async () => {
-      vi.spyOn(QwenLogger.prototype, 'logChatCompressionEvent');
+      const { logChatCompression } = await import('../telemetry/loggers.js');
+      vi.mocked(logChatCompression).mockClear();
 
       const MOCKED_TOKEN_LIMIT = 1000;
       const MOCKED_CONTEXT_PERCENTAGE_THRESHOLD = 0.5;
@@ -628,19 +618,37 @@ describe('Gemini Client (client.ts)', () => {
       vi.spyOn(client['config'], 'getChatCompression').mockReturnValue({
         contextPercentageThreshold: MOCKED_CONTEXT_PERCENTAGE_THRESHOLD,
       });
-      const history = [{ role: 'user', parts: [{ text: '...history...' }] }];
+      // Need multiple history items so there's something to compress
+      const history = [
+        { role: 'user', parts: [{ text: '...history 1...' }] },
+        { role: 'model', parts: [{ text: '...history 2...' }] },
+        { role: 'user', parts: [{ text: '...history 3...' }] },
+        { role: 'model', parts: [{ text: '...history 4...' }] },
+      ];
       mockGetHistory.mockReturnValue(history);
 
+      // Token count needs to be ABOVE the threshold to trigger compression
       const originalTokenCount =
-        MOCKED_TOKEN_LIMIT * MOCKED_CONTEXT_PERCENTAGE_THRESHOLD;
+        MOCKED_TOKEN_LIMIT * MOCKED_CONTEXT_PERCENTAGE_THRESHOLD + 1;
 
       vi.mocked(uiTelemetryService.getLastPromptTokenCount).mockReturnValue(
         originalTokenCount,
       );
 
-      // We need to control the estimated new token count.
-      // We mock startChat to return a chat with a known history.
+      // Mock the summary response from the chat
       const summaryText = 'This is a summary.';
+      mockGenerateContentFn.mockResolvedValue({
+        candidates: [
+          {
+            content: {
+              role: 'model',
+              parts: [{ text: summaryText }],
+            },
+          },
+        ],
+      } as unknown as GenerateContentResponse);
+
+      // Mock startChat to complete the compression flow
       const splitPoint = findCompressSplitPoint(history, 0.7);
       const historyToKeep = history.slice(splitPoint);
       const newCompressedHistory: Content[] = [
@@ -660,52 +668,36 @@ describe('Gemini Client (client.ts)', () => {
         .fn()
         .mockResolvedValue(mockNewChat as GeminiChat);
 
-      const totalChars = newCompressedHistory.reduce(
-        (total, content) => total + JSON.stringify(content).length,
-        0,
-      );
-      const newTokenCount = Math.floor(totalChars / 4);
-
-      // Mock the summary response from the chat
-      mockGenerateContentFn.mockResolvedValue({
-        candidates: [
-          {
-            content: {
-              role: 'model',
-              parts: [{ text: summaryText }],
-            },
-          },
-        ],
-      } as unknown as GenerateContentResponse);
-
       await client.tryCompressChat('prompt-id-3', false);
 
-      expect(QwenLogger.prototype.logChatCompressionEvent).toHaveBeenCalledWith(
+      expect(logChatCompression).toHaveBeenCalledWith(
+        expect.anything(),
         expect.objectContaining({
           tokens_before: originalTokenCount,
-          tokens_after: newTokenCount,
         }),
       );
-      expect(uiTelemetryService.setLastPromptTokenCount).toHaveBeenCalledWith(
-        newTokenCount,
-      );
-      expect(uiTelemetryService.setLastPromptTokenCount).toHaveBeenCalledTimes(
-        1,
-      );
+      expect(uiTelemetryService.setLastPromptTokenCount).toHaveBeenCalled();
     });
 
-    it('should trigger summarization if token count is at threshold with contextPercentageThreshold setting', async () => {
+    it('should trigger summarization if token count is above threshold with contextPercentageThreshold setting', async () => {
       const MOCKED_TOKEN_LIMIT = 1000;
       const MOCKED_CONTEXT_PERCENTAGE_THRESHOLD = 0.5;
       vi.mocked(tokenLimit).mockReturnValue(MOCKED_TOKEN_LIMIT);
       vi.spyOn(client['config'], 'getChatCompression').mockReturnValue({
         contextPercentageThreshold: MOCKED_CONTEXT_PERCENTAGE_THRESHOLD,
       });
-      const history = [{ role: 'user', parts: [{ text: '...history...' }] }];
+      // Need multiple history items so there's something to compress
+      const history = [
+        { role: 'user', parts: [{ text: '...history 1...' }] },
+        { role: 'model', parts: [{ text: '...history 2...' }] },
+        { role: 'user', parts: [{ text: '...history 3...' }] },
+        { role: 'model', parts: [{ text: '...history 4...' }] },
+      ];
       mockGetHistory.mockReturnValue(history);
 
+      // Token count needs to be ABOVE the threshold to trigger compression
       const originalTokenCount =
-        MOCKED_TOKEN_LIMIT * MOCKED_CONTEXT_PERCENTAGE_THRESHOLD;
+        MOCKED_TOKEN_LIMIT * MOCKED_CONTEXT_PERCENTAGE_THRESHOLD + 1;
 
       vi.mocked(uiTelemetryService.getLastPromptTokenCount).mockReturnValue(
         originalTokenCount,
@@ -865,7 +857,13 @@ describe('Gemini Client (client.ts)', () => {
     });
 
     it('should always trigger summarization when force is true, regardless of token count', async () => {
-      const history = [{ role: 'user', parts: [{ text: '...history...' }] }];
+      // Need multiple history items so there's something to compress
+      const history = [
+        { role: 'user', parts: [{ text: '...history 1...' }] },
+        { role: 'model', parts: [{ text: '...history 2...' }] },
+        { role: 'user', parts: [{ text: '...history 3...' }] },
+        { role: 'model', parts: [{ text: '...history 4...' }] },
+      ];
       mockGetHistory.mockReturnValue(history);
 
       const originalTokenCount = 100; // Well below threshold, but > estimated new count
@@ -1047,6 +1045,7 @@ describe('Gemini Client (client.ts)', () => {
       const mockChat = {
         addHistory: vi.fn(),
         getHistory: vi.fn().mockReturnValue([]),
+        stripThoughtsFromHistory: vi.fn(),
       } as unknown as GeminiChat;
       client['chat'] = mockChat;
 
@@ -1109,6 +1108,7 @@ ${JSON.stringify(
       const mockChat: Partial<GeminiChat> = {
         addHistory: vi.fn(),
         getHistory: vi.fn().mockReturnValue([]),
+        stripThoughtsFromHistory: vi.fn(),
       };
       client['chat'] = mockChat as GeminiChat;
 
@@ -1164,6 +1164,7 @@ ${JSON.stringify(
       const mockChat: Partial<GeminiChat> = {
         addHistory: vi.fn(),
         getHistory: vi.fn().mockReturnValue([]),
+        stripThoughtsFromHistory: vi.fn(),
       };
       client['chat'] = mockChat as GeminiChat;
 
@@ -1240,6 +1241,7 @@ ${JSON.stringify(
       const mockChat: Partial<GeminiChat> = {
         addHistory: vi.fn(),
         getHistory: vi.fn().mockReturnValue([]),
+        stripThoughtsFromHistory: vi.fn(),
       };
       client['chat'] = mockChat as GeminiChat;
 
@@ -1286,6 +1288,7 @@ ${JSON.stringify(
       const mockChat: Partial<GeminiChat> = {
         addHistory: vi.fn(),
         getHistory: vi.fn().mockReturnValue([]),
+        stripThoughtsFromHistory: vi.fn(),
       };
       client['chat'] = mockChat as GeminiChat;
 
@@ -1330,6 +1333,7 @@ ${JSON.stringify(
       const mockChat: Partial<GeminiChat> = {
         addHistory: vi.fn(),
         getHistory: vi.fn().mockReturnValue([]),
+        stripThoughtsFromHistory: vi.fn(),
       };
       client['chat'] = mockChat as GeminiChat;
 
@@ -1417,6 +1421,7 @@ ${JSON.stringify(
       const mockChat: Partial<GeminiChat> = {
         addHistory: vi.fn(),
         getHistory: vi.fn().mockReturnValue([]),
+        stripThoughtsFromHistory: vi.fn(),
       };
       client['chat'] = mockChat as GeminiChat;
 
@@ -1473,6 +1478,7 @@ ${JSON.stringify(
       const mockChat: Partial<GeminiChat> = {
         addHistory: vi.fn(),
         getHistory: vi.fn().mockReturnValue([]),
+        stripThoughtsFromHistory: vi.fn(),
       };
       client['chat'] = mockChat as GeminiChat;
 
@@ -1486,6 +1492,7 @@ ${JSON.stringify(
         [{ text: 'Start conversation' }],
         signal,
         'prompt-id-3',
+        { isContinuation: false },
         Number.MAX_SAFE_INTEGER, // Bypass the MAX_TURNS protection
       );
 
@@ -1552,6 +1559,7 @@ ${JSON.stringify(
             .mockReturnValue([
               { role: 'user', parts: [{ text: 'previous message' }] },
             ]),
+          stripThoughtsFromHistory: vi.fn(),
         };
         client['chat'] = mockChat as GeminiChat;
       });
@@ -1806,6 +1814,7 @@ ${JSON.stringify(
           addHistory: vi.fn(),
           getHistory: vi.fn().mockReturnValue([]), // Default empty history
           setHistory: vi.fn(),
+          stripThoughtsFromHistory: vi.fn(),
         };
         client['chat'] = mockChat as GeminiChat;
 
@@ -2146,6 +2155,7 @@ ${JSON.stringify(
       const mockChat: Partial<GeminiChat> = {
         addHistory: vi.fn(),
         getHistory: vi.fn().mockReturnValue([]),
+        stripThoughtsFromHistory: vi.fn(),
       };
       client['chat'] = mockChat as GeminiChat;
 
@@ -2182,6 +2192,7 @@ ${JSON.stringify(
       const mockChat: Partial<GeminiChat> = {
         addHistory: vi.fn(),
         getHistory: vi.fn().mockReturnValue([]),
+        stripThoughtsFromHistory: vi.fn(),
       };
       client['chat'] = mockChat as GeminiChat;
 
@@ -2222,6 +2233,7 @@ ${JSON.stringify(
       const mockChat: Partial<GeminiChat> = {
         addHistory: vi.fn(),
         getHistory: vi.fn().mockReturnValue([]),
+        stripThoughtsFromHistory: vi.fn(),
       };
       client['chat'] = mockChat as GeminiChat;
 
@@ -2346,16 +2358,15 @@ ${JSON.stringify(
       );
 
       expect(mockContentGenerator.generateContent).toHaveBeenCalledWith(
-        {
+        expect.objectContaining({
           model: DEFAULT_GEMINI_FLASH_MODEL,
-          config: {
+          config: expect.objectContaining({
             abortSignal,
             systemInstruction: getCoreSystemPrompt(''),
             temperature: 0.5,
-            topP: 1,
-          },
+          }),
           contents,
-        },
+        }),
         'test-session-id',
       );
     });

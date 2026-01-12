@@ -15,6 +15,7 @@ import type {
 } from '@qwen-code/qwen-code-core';
 import { ToolGroupMessage } from './messages/ToolGroupMessage.js';
 import { renderWithProviders } from '../../test-utils/render.js';
+import { ConfigContext } from '../contexts/ConfigContext.js';
 
 // Mock child components
 vi.mock('./messages/ToolGroupMessage.js', () => ({
@@ -22,7 +23,9 @@ vi.mock('./messages/ToolGroupMessage.js', () => ({
 }));
 
 describe('<HistoryItemDisplay />', () => {
-  const mockConfig = {} as unknown as Config;
+  const mockConfig = {
+    getChatRecordingService: () => undefined,
+  } as unknown as Config;
   const baseItem = {
     id: 1,
     timestamp: 12345,
@@ -71,15 +74,24 @@ describe('<HistoryItemDisplay />', () => {
 
   it('renders AboutBox for "about" type', () => {
     const item: HistoryItem = {
-      ...baseItem,
+      id: 1,
       type: MessageType.ABOUT,
-      cliVersion: '1.0.0',
-      osVersion: 'test-os',
-      sandboxEnv: 'test-env',
-      modelVersion: 'test-model',
-      selectedAuthType: 'test-auth',
-      gcpProject: 'test-project',
-      ideClient: 'test-ide',
+      systemInfo: {
+        cliVersion: '1.0.0',
+        osPlatform: 'test-os',
+        osArch: 'x64',
+        osRelease: '22.0.0',
+        nodeVersion: 'v20.0.0',
+        npmVersion: '10.0.0',
+        sandboxEnv: 'test-env',
+        modelVersion: 'test-model',
+        selectedAuthType: 'test-auth',
+        ideClient: 'test-ide',
+        sessionId: 'test-session-id',
+        memoryUsage: '100 MB',
+        baseUrl: undefined,
+        gitCommit: undefined,
+      },
     };
     const { lastFrame } = renderWithProviders(
       <HistoryItemDisplay {...baseItem} item={item} />,
@@ -124,9 +136,11 @@ describe('<HistoryItemDisplay />', () => {
       duration: '1s',
     };
     const { lastFrame } = renderWithProviders(
-      <SessionStatsProvider>
-        <HistoryItemDisplay {...baseItem} item={item} />
-      </SessionStatsProvider>,
+      <ConfigContext.Provider value={mockConfig as never}>
+        <SessionStatsProvider>
+          <HistoryItemDisplay {...baseItem} item={item} />
+        </SessionStatsProvider>
+      </ConfigContext.Provider>,
     );
     expect(lastFrame()).toContain('Agent powering down. Goodbye!');
   });

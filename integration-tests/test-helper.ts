@@ -9,7 +9,6 @@ import { mkdirSync, writeFileSync, readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { env } from 'node:process';
-import { DEFAULT_QWEN_MODEL } from '../packages/core/src/config/models.js';
 import fs from 'node:fs';
 import { EOL } from 'node:os';
 import * as pty from '@lydell/node-pty';
@@ -182,7 +181,6 @@ export class TestRig {
         otlpEndpoint: '',
         outfile: telemetryPath,
       },
-      model: DEFAULT_QWEN_MODEL,
       sandbox: env.GEMINI_SANDBOX !== 'false' ? env.GEMINI_SANDBOX : false,
       ...options.settings, // Allow tests to override/add settings
     };
@@ -220,8 +218,8 @@ export class TestRig {
       process.env.INTEGRATION_TEST_USE_INSTALLED_GEMINI === 'true';
     const command = isNpmReleaseTest ? 'qwen' : 'node';
     const initialArgs = isNpmReleaseTest
-      ? extraInitialArgs
-      : [this.bundlePath, ...extraInitialArgs];
+      ? ['--no-chat-recording', ...extraInitialArgs]
+      : [this.bundlePath, '--no-chat-recording', ...extraInitialArgs];
     return { command, initialArgs };
   }
 
@@ -342,7 +340,8 @@ export class TestRig {
           // as it would corrupt the JSON
           const isJsonOutput =
             commandArgs.includes('--output-format') &&
-            commandArgs.includes('json');
+            (commandArgs.includes('json') ||
+              commandArgs.includes('stream-json'));
 
           // If we have stderr output and it's not a JSON test, include that also
           if (stderr && !isJsonOutput) {
@@ -351,7 +350,23 @@ export class TestRig {
 
           resolve(result);
         } else {
-          reject(new Error(`Process exited with code ${code}:\n${stderr}`));
+          // Check if this is a JSON output test - for JSON errors, the error is in stdout
+          const isJsonOutputOnError =
+            commandArgs.includes('--output-format') &&
+            (commandArgs.includes('json') ||
+              commandArgs.includes('stream-json'));
+
+          // For JSON output tests, include stdout in the error message
+          // as the error JSON is written to stdout
+          if (isJsonOutputOnError && stdout) {
+            reject(
+              new Error(
+                `Process exited with code ${code}:\nStdout:\n${stdout}\n\nStderr:\n${stderr}`,
+              ),
+            );
+          } else {
+            reject(new Error(`Process exited with code ${code}:\n${stderr}`));
+          }
         }
       });
     });

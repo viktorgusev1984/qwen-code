@@ -9,11 +9,9 @@ import { Box, Text } from 'ink';
 import { theme } from '../semantic-colors.js';
 import type { LoadedSettings, Settings } from '../../config/settings.js';
 import { SettingScope } from '../../config/settings.js';
-import {
-  getScopeItems,
-  getScopeMessageForSetting,
-} from '../../utils/dialogScopeUtils.js';
-import { RadioButtonSelect } from './shared/RadioButtonSelect.js';
+import { getScopeMessageForSetting } from '../../utils/dialogScopeUtils.js';
+import { ScopeSelector } from './shared/ScopeSelector.js';
+import { t } from '../../i18n/index.js';
 import {
   getDialogSettingKeys,
   setPendingSettingValue,
@@ -30,6 +28,7 @@ import {
   getEffectiveValue,
 } from '../../utils/settingsUtils.js';
 import { useVimMode } from '../contexts/VimModeContext.js';
+import { type Config } from '@qwen-code/qwen-code-core';
 import { useKeypress } from '../hooks/useKeypress.js';
 import chalk from 'chalk';
 import { cpSlice, cpLen, stripUnsafeCharacters } from '../utils/textUtils.js';
@@ -43,6 +42,7 @@ interface SettingsDialogProps {
   onSelect: (settingName: string | undefined, scope: SettingScope) => void;
   onRestartRequest?: () => void;
   availableTerminalHeight?: number;
+  config?: Config;
 }
 
 const maxItemsToShow = 8;
@@ -52,6 +52,7 @@ export function SettingsDialog({
   onSelect,
   onRestartRequest,
   availableTerminalHeight,
+  config,
 }: SettingsDialogProps): React.JSX.Element {
   // Get vim mode context to sync vim mode changes
   const { vimEnabled, toggleVimEnabled } = useVimMode();
@@ -124,7 +125,9 @@ export function SettingsDialog({
       const definition = getSettingDefinition(key);
 
       return {
-        label: definition?.label || key,
+        label: definition?.label
+          ? t(definition.label) || definition.label
+          : key,
         value: key,
         type: definition?.type,
         toggle: () => {
@@ -182,6 +185,21 @@ export function SettingsDialog({
               toggleVimEnabled().catch((error) => {
                 console.error('Failed to toggle vim mode:', error);
               });
+            }
+
+            // Special handling for approval mode to apply to current session
+            if (
+              key === 'tools.approvalMode' &&
+              settings.merged.tools?.approvalMode
+            ) {
+              try {
+                config?.setApprovalMode(settings.merged.tools.approvalMode);
+              } catch (error) {
+                console.error(
+                  'Failed to apply approval mode to current session:',
+                  error,
+                );
+              }
             }
 
             // Remove from modifiedSettings since it's now saved
@@ -356,12 +374,6 @@ export function SettingsDialog({
     setEditBuffer('');
     setEditCursorPos(0);
   };
-
-  // Scope selector items
-  const scopeItems = getScopeItems().map((item) => ({
-    ...item,
-    key: item.value,
-  }));
 
   const handleScopeHighlight = (scope: SettingScope) => {
     setSelectedScope(scope);
@@ -616,7 +628,11 @@ export function SettingsDialog({
                   prev,
                 ),
               );
-            } else if (defType === 'number' || defType === 'string') {
+            } else if (
+              defType === 'number' ||
+              defType === 'string' ||
+              defType === 'enum'
+            ) {
               if (
                 typeof defaultValue === 'number' ||
                 typeof defaultValue === 'string'
@@ -672,6 +688,21 @@ export function SettingsDialog({
                 settings,
                 selectedScope,
               );
+
+              // Special handling for approval mode to apply to current session
+              if (
+                currentSetting.value === 'tools.approvalMode' &&
+                settings.merged.tools?.approvalMode
+              ) {
+                try {
+                  config?.setApprovalMode(settings.merged.tools.approvalMode);
+                } catch (error) {
+                  console.error(
+                    'Failed to apply approval mode to current session:',
+                    error,
+                  );
+                }
+              }
 
               // Remove from global pending changes if present
               setGlobalPendingChanges((prev) => {
@@ -751,7 +782,8 @@ export function SettingsDialog({
     >
       <Box flexDirection="column" flexGrow={1}>
         <Text bold={focusSection === 'settings'} wrap="truncate">
-          {focusSection === 'settings' ? '> ' : '  '}Settings
+          {focusSection === 'settings' ? '> ' : '  '}
+          {t('Settings')}
         </Text>
         <Box height={1} />
         {showScrollUp && <Text color={theme.text.secondary}>▲</Text>}
@@ -876,32 +908,27 @@ export function SettingsDialog({
 
         {/* Scope Selection - conditionally visible based on height constraints */}
         {showScopeSelection && (
-          <Box marginTop={1} flexDirection="column">
-            <Text bold={focusSection === 'scope'} wrap="truncate">
-              {focusSection === 'scope' ? '> ' : '  '}Apply To
-            </Text>
-            <RadioButtonSelect
-              items={scopeItems}
-              initialIndex={scopeItems.findIndex(
-                (item) => item.value === selectedScope,
-              )}
+          <Box marginTop={1}>
+            <ScopeSelector
               onSelect={handleScopeSelect}
               onHighlight={handleScopeHighlight}
               isFocused={focusSection === 'scope'}
-              showNumbers={focusSection === 'scope'}
+              initialScope={selectedScope}
             />
           </Box>
         )}
 
         <Box height={1} />
         <Text color={theme.text.secondary}>
-          (Use Enter to select
-          {showScopeSelection ? ', Tab to change focus' : ''})
+          {t('(Use Enter to select{{tabText}})', {
+            tabText: showScopeSelection ? t(', Tab to change focus') : '',
+          })}
         </Text>
         {showRestartPrompt && (
           <Text color={theme.status.warning}>
-            To see changes, Qwen Code must be restarted. Press r to exit and
-            apply changes now.
+            {t(
+              'To see changes, Qwen Code must be restarted. Press r to exit and apply changes now.',
+            )}
           </Text>
         )}
       </Box>

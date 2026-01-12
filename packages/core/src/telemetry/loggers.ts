@@ -9,7 +9,6 @@ import { logs } from '@opentelemetry/api-logs';
 import { SemanticAttributes } from '@opentelemetry/semantic-conventions';
 import type { Config } from '../config/config.js';
 import { safeJsonStringify } from '../utils/safeJsonStringify.js';
-import { UserAccountManager } from '../utils/userAccountManager.js';
 import {
   EVENT_API_ERROR,
   EVENT_API_CANCEL,
@@ -37,6 +36,7 @@ import {
   EVENT_SUBAGENT_EXECUTION,
   EVENT_MALFORMED_JSON_RESPONSE,
   EVENT_INVALID_CHUNK,
+  EVENT_AUTH,
 } from './constants.js';
 import {
   recordApiErrorMetrics,
@@ -83,6 +83,7 @@ import type {
   SubagentExecutionEvent,
   MalformedJsonResponseEvent,
   InvalidChunkEvent,
+  AuthEvent,
 } from './types.js';
 import type { UiEvent } from './uiTelemetry.js';
 import { uiTelemetryService } from './uiTelemetry.js';
@@ -91,15 +92,12 @@ const shouldLogUserPrompts = (config: Config): boolean =>
   config.getTelemetryLogPromptsEnabled();
 
 function getCommonAttributes(config: Config): LogAttributes {
-  const userAccountManager = new UserAccountManager();
-  const email = userAccountManager.getCachedGoogleAccount();
   return {
     'session.id': config.getSessionId(),
-    ...(email && { 'user.email': email }),
   };
 }
 
-export function logCliConfiguration(
+export function logStartSession(
   config: Config,
   event: StartSessionEvent,
 ): void {
@@ -170,6 +168,7 @@ export function logToolCall(config: Config, event: ToolCallEvent): void {
     'event.timestamp': new Date().toISOString(),
   } as UiEvent;
   uiTelemetryService.addEvent(uiEvent);
+  config.getChatRecordingService()?.recordUiTelemetryEvent(uiEvent);
   QwenLogger.getInstance(config)?.logToolCallEvent(event);
   if (!isTelemetrySdkInitialized()) return;
 
@@ -312,7 +311,7 @@ export function logRipgrepFallback(
   config: Config,
   event: RipgrepFallbackEvent,
 ): void {
-  QwenLogger.getInstance(config)?.logRipgrepFallbackEvent();
+  QwenLogger.getInstance(config)?.logRipgrepFallbackEvent(event);
   if (!isTelemetrySdkInitialized()) return;
 
   const attributes: LogAttributes = {
@@ -337,6 +336,7 @@ export function logApiError(config: Config, event: ApiErrorEvent): void {
     'event.timestamp': new Date().toISOString(),
   } as UiEvent;
   uiTelemetryService.addEvent(uiEvent);
+  config.getChatRecordingService()?.recordUiTelemetryEvent(uiEvent);
   QwenLogger.getInstance(config)?.logApiErrorEvent(event);
   if (!isTelemetrySdkInitialized()) return;
 
@@ -403,6 +403,7 @@ export function logApiResponse(config: Config, event: ApiResponseEvent): void {
     'event.timestamp': new Date().toISOString(),
   } as UiEvent;
   uiTelemetryService.addEvent(uiEvent);
+  config.getChatRecordingService()?.recordUiTelemetryEvent(uiEvent);
   QwenLogger.getInstance(config)?.logApiResponseEvent(event);
   if (!isTelemetrySdkInitialized()) return;
   const attributes: LogAttributes = {
@@ -834,6 +835,32 @@ export function logExtensionDisable(
   const logger = logs.getLogger(SERVICE_NAME);
   const logRecord: LogRecord = {
     body: `Disabled extension ${event.extension_name}`,
+    attributes,
+  };
+  logger.emit(logRecord);
+}
+
+export function logAuth(config: Config, event: AuthEvent): void {
+  QwenLogger.getInstance(config)?.logAuthEvent(event);
+  if (!isTelemetrySdkInitialized()) return;
+
+  const attributes: LogAttributes = {
+    ...getCommonAttributes(config),
+    ...event,
+    'event.name': EVENT_AUTH,
+    'event.timestamp': new Date().toISOString(),
+    auth_type: event.auth_type,
+    action_type: event.action_type,
+    status: event.status,
+  };
+
+  if (event.error_message) {
+    attributes['error.message'] = event.error_message;
+  }
+
+  const logger = logs.getLogger(SERVICE_NAME);
+  const logRecord: LogRecord = {
+    body: `Auth event: ${event.action_type} ${event.status} for ${event.auth_type}`,
     attributes,
   };
   logger.emit(logRecord);

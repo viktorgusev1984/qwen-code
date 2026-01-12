@@ -26,9 +26,12 @@ import {
   UnauthorizedError,
   toFriendlyError,
 } from '../utils/errors.js';
-import { StreamEventType } from './geminiChat.js';
-import type { GeminiChat, StreamEvent } from './geminiChat.js';
-import { parseThought, type ThoughtSummary } from '../utils/thoughtUtils.js';
+import type { GeminiChat } from './geminiChat.js';
+import {
+  getThoughtText,
+  parseThought,
+  type ThoughtSummary,
+} from '../utils/thoughtUtils.js';
 
 // Define a structure for tools passed to the server
 export interface ServerTool {
@@ -154,6 +157,9 @@ export enum CompressionStatus {
   /** The compression failed due to an error counting tokens */
   COMPRESSION_FAILED_TOKEN_COUNT_ERROR,
 
+  /** The compression failed due to receiving an empty or null summary */
+  COMPRESSION_FAILED_EMPTY_SUMMARY,
+
   /** The compression was not necessary and no action was taken */
   NOOP,
 }
@@ -226,40 +232,20 @@ export class Turn {
     model: string,
     req: PartListUnion,
     signal: AbortSignal,
-    mode: 'stream' | 'sync' = 'stream',
   ): AsyncGenerator<ServerGeminiStreamEvent> {
     try {
-      let responseStream: AsyncGenerator<StreamEvent>;
-      if (mode === 'stream') {
-        responseStream = await this.chat.sendMessageStream(
-          model,
-          {
-            message: req,
-            config: {
-              abortSignal: signal,
-            },
+      // Note: This assumes `sendMessageStream` yields events like
+      // { type: StreamEventType.RETRY } or { type: StreamEventType.CHUNK, value: GenerateContentResponse }
+      const responseStream = await this.chat.sendMessageStream(
+        model,
+        {
+          message: req,
+          config: {
+            abortSignal: signal,
           },
-          this.prompt_id,
-        );
-      } else {
-        const response = await this.chat.sendMessage(
-          model,
-          {
-            message: req,
-            config: {
-              abortSignal: signal,
-            },
-          },
-          this.prompt_id,
-        );
-        const pendingEvents = this.chat.drainPendingSyncStreamEvents();
-        responseStream = (async function* () {
-          for (const pendingEvent of pendingEvents) {
-            yield pendingEvent;
-          }
-          yield { type: StreamEventType.CHUNK, value: response };
-        })();
-      }
+        },
+        this.prompt_id,
+      );
 
       for await (const streamEvent of responseStream) {
         if (signal?.aborted) {
@@ -284,14 +270,12 @@ export class Turn {
           this.currentResponseId = resp.responseId;
         }
 
-        const thoughtPart = resp.candidates?.[0]?.content?.parts?.[0];
-        if (thoughtPart?.thought) {
-          const thought = parseThought(thoughtPart.text ?? '');
+        const thoughtText = getThoughtText(resp);
+        if (thoughtText) {
           yield {
             type: GeminiEventType.Thought,
-            value: thought,
+            value: parseThought(thoughtText),
           };
-          continue;
         }
 
         const text = getResponseText(resp);
@@ -336,10 +320,6 @@ export class Turn {
         }
       }
     } catch (e) {
-      if (mode === 'sync') {
-        // Ensure no stale events leak into the next turn if an error occurs.
-        this.chat.drainPendingSyncStreamEvents();
-      }
       if (signal.aborted) {
         yield { type: GeminiEventType.UserCancelled };
         // Regular cancellation error, fail gracefully.
@@ -352,15 +332,11 @@ export class Turn {
       }
 
       const contextForReport = [...this.chat.getHistory(/*curated*/ true), req];
-      const contextName =
-        mode === 'stream'
-          ? 'Turn.run-sendMessageStream'
-          : 'Turn.run-sendMessage';
       await reportError(
         error,
         'Error when talking to API',
         contextForReport,
-        contextName,
+        'Turn.run-sendMessageStream',
       );
       const status =
         typeof error === 'object' &&

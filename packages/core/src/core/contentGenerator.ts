@@ -12,14 +12,8 @@ import type {
   GenerateContentParameters,
   GenerateContentResponse,
 } from '@google/genai';
-import { GoogleGenAI } from '@google/genai';
-import { createCodeAssistContentGenerator } from '../code_assist/codeAssist.js';
-import type { Config } from '../config/config.js';
 import { DEFAULT_QWEN_MODEL } from '../config/models.js';
-
-import type { UserTierId } from '../code_assist/types.js';
-import { InstallationManager } from '../utils/installationManager.js';
-import { LoggingContentGenerator } from './loggingContentGenerator.js';
+import type { Config } from '../config/config.js';
 
 /**
  * Interface abstracting the core functionalities for generating content and counting tokens.
@@ -39,14 +33,12 @@ export interface ContentGenerator {
 
   embedContent(request: EmbedContentParameters): Promise<EmbedContentResponse>;
 
-  userTier?: UserTierId;
+  useSummarizedThinking(): boolean;
 }
 
 export enum AuthType {
-  LOGIN_WITH_GOOGLE = 'oauth-personal',
   USE_GEMINI = 'gemini-api-key',
   USE_VERTEX_AI = 'vertex-ai',
-  CLOUD_SHELL = 'cloud-shell',
   USE_OPENAI = 'openai',
   QWEN_OAUTH = 'qwen-oauth',
 }
@@ -58,12 +50,10 @@ export type ContentGeneratorConfig = {
   vertexai?: boolean;
   authType?: AuthType | undefined;
   enableOpenAILogging?: boolean;
-  // Timeout configuration in milliseconds
-  timeout?: number;
-  // Maximum retries for failed requests
-  maxRetries?: number;
-  // Disable cache control for DashScope providers
-  disableCacheControl?: boolean;
+  openAILoggingDir?: string;
+  timeout?: number; // Timeout configuration in milliseconds
+  maxRetries?: number; // Maximum retries for failed requests
+  disableCacheControl?: boolean; // Disable cache control for DashScope providers
   samplingParams?: {
     top_p?: number;
     top_k?: number;
@@ -73,8 +63,13 @@ export type ContentGeneratorConfig = {
     temperature?: number;
     max_tokens?: number;
   };
+  reasoning?: {
+    effort?: 'low' | 'medium' | 'high';
+  };
   proxy?: string | undefined;
   userAgent?: string;
+  // Schema compliance mode for tool definitions
+  schemaCompliance?: 'auto' | 'openapi_30';
 };
 
 export function createContentGeneratorConfig(
@@ -82,103 +77,52 @@ export function createContentGeneratorConfig(
   authType: AuthType | undefined,
   generationConfig?: Partial<ContentGeneratorConfig>,
 ): ContentGeneratorConfig {
-  const geminiApiKey = process.env['GEMINI_API_KEY'] || undefined;
-  const googleApiKey = process.env['GOOGLE_API_KEY'] || undefined;
-  const googleCloudProject = process.env['GOOGLE_CLOUD_PROJECT'] || undefined;
-  const googleCloudLocation = process.env['GOOGLE_CLOUD_LOCATION'] || undefined;
-
-  const newContentGeneratorConfig: ContentGeneratorConfig = {
+  const newContentGeneratorConfig: Partial<ContentGeneratorConfig> = {
     ...(generationConfig || {}),
-    model: generationConfig?.model || DEFAULT_QWEN_MODEL,
     authType,
     proxy: config?.getProxy(),
   };
 
-  // If we are using Google auth or we are in Cloud Shell, there is nothing else to validate for now
-  if (
-    authType === AuthType.LOGIN_WITH_GOOGLE ||
-    authType === AuthType.CLOUD_SHELL
-  ) {
-    return newContentGeneratorConfig;
-  }
-
-  if (authType === AuthType.USE_GEMINI && geminiApiKey) {
-    newContentGeneratorConfig.apiKey = geminiApiKey;
-    newContentGeneratorConfig.vertexai = false;
-
-    return newContentGeneratorConfig;
-  }
-
-  if (
-    authType === AuthType.USE_VERTEX_AI &&
-    (googleApiKey || (googleCloudProject && googleCloudLocation))
-  ) {
-    newContentGeneratorConfig.apiKey = googleApiKey;
-    newContentGeneratorConfig.vertexai = true;
-
-    return newContentGeneratorConfig;
-  }
-
   if (authType === AuthType.QWEN_OAUTH) {
     // For Qwen OAuth, we'll handle the API key dynamically in createContentGenerator
     // Set a special marker to indicate this is Qwen OAuth
-    newContentGeneratorConfig.apiKey = 'QWEN_OAUTH_DYNAMIC_TOKEN';
-    newContentGeneratorConfig.model = DEFAULT_QWEN_MODEL;
-
-    return newContentGeneratorConfig;
+    return {
+      ...newContentGeneratorConfig,
+      model: DEFAULT_QWEN_MODEL,
+      apiKey: 'QWEN_OAUTH_DYNAMIC_TOKEN',
+    } as ContentGeneratorConfig;
   }
 
-  return newContentGeneratorConfig;
+  if (authType === AuthType.USE_OPENAI) {
+    if (!newContentGeneratorConfig.apiKey) {
+      throw new Error('OpenAI API key is required');
+    }
+
+    return {
+      ...newContentGeneratorConfig,
+      model: newContentGeneratorConfig?.model || 'qwen3-coder-plus',
+    } as ContentGeneratorConfig;
+  }
+
+  return {
+    ...newContentGeneratorConfig,
+    model: newContentGeneratorConfig?.model || DEFAULT_QWEN_MODEL,
+  } as ContentGeneratorConfig;
 }
 
 export async function createContentGenerator(
   config: ContentGeneratorConfig,
   gcConfig: Config,
-  sessionId?: string,
+  isInitialAuth?: boolean,
 ): Promise<ContentGenerator> {
-  const version = process.env['CLI_VERSION'] || process.version;
-  const userAgent = `QwenCode/${version} (${process.platform}; ${process.arch})`;
-  const baseHeaders: Record<string, string> = {
-    'User-Agent': userAgent,
-  };
-
-  if (
-    config.authType === AuthType.LOGIN_WITH_GOOGLE ||
-    config.authType === AuthType.CLOUD_SHELL
-  ) {
-    const httpOptions = { headers: baseHeaders };
-    return new LoggingContentGenerator(
-      await createCodeAssistContentGenerator(
-        httpOptions,
-        config.authType,
-        gcConfig,
-        sessionId,
-      ),
-      gcConfig,
-    );
-  }
-
   if (
     config.authType === AuthType.USE_GEMINI ||
     config.authType === AuthType.USE_VERTEX_AI
   ) {
-    let headers: Record<string, string> = { ...baseHeaders };
-    if (gcConfig?.getUsageStatisticsEnabled()) {
-      const installationManager = new InstallationManager();
-      const installationId = installationManager.getInstallationId();
-      headers = {
-        ...headers,
-        'x-gemini-api-privileged-user-id': `${installationId}`,
-      };
-    }
-    const httpOptions = { headers };
-
-    const googleGenAI = new GoogleGenAI({
-      apiKey: config.apiKey === '' ? undefined : config.apiKey,
-      vertexai: config.vertexai,
-      httpOptions,
-    });
-    return new LoggingContentGenerator(googleGenAI.models, gcConfig);
+    const { createGeminiContentGenerator } = await import(
+      './geminiContentGenerator/index.js'
+    );
+    return createGeminiContentGenerator(config, gcConfig);
   }
 
   if (config.authType === AuthType.USE_OPENAI) {
@@ -206,13 +150,17 @@ export async function createContentGenerator(
 
     try {
       // Get the Qwen OAuth client (now includes integrated token management)
-      const qwenClient = await getQwenOauthClient(gcConfig);
+      // If this is initial auth, require cached credentials to detect missing credentials
+      const qwenClient = await getQwenOauthClient(
+        gcConfig,
+        isInitialAuth ? { requireCachedCredentials: true } : undefined,
+      );
 
       // Create the content generator with dynamic token management
       return new QwenContentGenerator(qwenClient, config, gcConfig);
     } catch (error) {
       throw new Error(
-        `Failed to initialize Qwen: ${error instanceof Error ? error.message : String(error)}`,
+        `${error instanceof Error ? error.message : String(error)}`,
       );
     }
   }

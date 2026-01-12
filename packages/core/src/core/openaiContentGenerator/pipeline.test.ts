@@ -60,6 +60,7 @@ describe('ContentGenerationPipeline', () => {
       buildClient: vi.fn().mockReturnValue(mockClient),
       buildRequest: vi.fn().mockImplementation((req) => req),
       buildHeaders: vi.fn().mockReturnValue({}),
+      getDefaultGenerationConfig: vi.fn().mockReturnValue({}),
     };
 
     // Mock telemetry service
@@ -108,7 +109,10 @@ describe('ContentGenerationPipeline', () => {
   describe('constructor', () => {
     it('should initialize with correct configuration', () => {
       expect(mockProvider.buildClient).toHaveBeenCalled();
-      expect(OpenAIContentConverter).toHaveBeenCalledWith('test-model');
+      expect(OpenAIContentConverter).toHaveBeenCalledWith(
+        'test-model',
+        undefined,
+      );
     });
   });
 

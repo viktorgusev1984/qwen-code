@@ -12,6 +12,7 @@ import type {
   ChatCompressionSettings,
 } from '@qwen-code/qwen-code-core';
 import {
+  ApprovalMode,
   DEFAULT_TRUNCATE_TOOL_OUTPUT_LINES,
   DEFAULT_TRUNCATE_TOOL_OUTPUT_THRESHOLD,
 } from '@qwen-code/qwen-code-core';
@@ -146,6 +147,16 @@ const SETTINGS_SCHEMA = {
         description: 'Disable update notification prompts.',
         showInDialog: false,
       },
+      gitCoAuthor: {
+        type: 'boolean',
+        label: 'Git Co-Author',
+        category: 'General',
+        requiresRestart: false,
+        default: true,
+        description:
+          'Automatically add a Co-authored-by trailer to git commit messages when commits are made through Qwen Code.',
+        showInDialog: false,
+      },
       checkpointing: {
         type: 'object',
         label: 'Checkpointing',
@@ -166,16 +177,6 @@ const SETTINGS_SCHEMA = {
           },
         },
       },
-      enablePromptCompletion: {
-        type: 'boolean',
-        label: 'Enable Prompt Completion',
-        category: 'General',
-        requiresRestart: true,
-        default: false,
-        description:
-          'Enable AI-powered prompt completion suggestions while typing.',
-        showInDialog: true,
-      },
       debugKeystrokeLogging: {
         type: 'boolean',
         label: 'Debug Keystroke Logging',
@@ -184,6 +185,44 @@ const SETTINGS_SCHEMA = {
         default: false,
         description: 'Enable debug logging of keystrokes to the console.',
         showInDialog: true,
+      },
+      language: {
+        type: 'enum',
+        label: 'Language',
+        category: 'General',
+        requiresRestart: false,
+        default: 'auto',
+        description:
+          'The language for the user interface. Use "auto" to detect from system settings. ' +
+          'You can also use custom language codes (e.g., "es", "fr") by placing JS language files ' +
+          'in ~/.qwen/locales/ (e.g., ~/.qwen/locales/es.js).',
+        showInDialog: true,
+        options: [
+          { value: 'auto', label: 'Auto (detect from system)' },
+          { value: 'en', label: 'English' },
+          { value: 'zh', label: '中文 (Chinese)' },
+          { value: 'ru', label: 'Русский (Russian)' },
+        ],
+      },
+      terminalBell: {
+        type: 'boolean',
+        label: 'Terminal Bell',
+        category: 'General',
+        requiresRestart: false,
+        default: true,
+        description:
+          'Play terminal bell sound when response completes or needs approval.',
+        showInDialog: true,
+      },
+      chatRecording: {
+        type: 'boolean',
+        label: 'Chat Recording',
+        category: 'General',
+        requiresRestart: true,
+        default: true,
+        description:
+          'Enable saving chat history to disk. Disabling this will also prevent --continue and --resume from working.',
+        showInDialog: false,
       },
     },
   },
@@ -255,7 +294,7 @@ const SETTINGS_SCHEMA = {
         requiresRestart: false,
         default: false,
         description:
-          'Show Gemini CLI status and thoughts in the terminal window title',
+          'Show Qwen Code status and thoughts in the terminal window title',
         showInDialog: true,
       },
       hideTips: {
@@ -283,7 +322,7 @@ const SETTINGS_SCHEMA = {
         requiresRestart: false,
         default: false,
         description:
-          'Hide the context summary (GEMINI.md, MCP servers) above the input.',
+          'Hide the context summary (QWEN.md, MCP servers) above the input.',
         showInDialog: true,
       },
       footer: {
@@ -489,7 +528,7 @@ const SETTINGS_SCHEMA = {
         category: 'Model',
         requiresRestart: false,
         default: undefined as string | undefined,
-        description: 'The Gemini model to use for conversations.',
+        description: 'The model to use for conversations.',
         showInDialog: false,
       },
       streamingMode: {
@@ -563,6 +602,16 @@ const SETTINGS_SCHEMA = {
         description: 'Disable all loop detection checks (streaming and LLM).',
         showInDialog: true,
       },
+      skipStartupContext: {
+        type: 'boolean',
+        label: 'Skip Startup Context',
+        category: 'Model',
+        requiresRestart: true,
+        default: false,
+        description:
+          'Avoid sending the workspace startup context at the beginning of each session.',
+        showInDialog: true,
+      },
       enableOpenAILogging: {
         type: 'boolean',
         label: 'Enable OpenAI Logging',
@@ -570,6 +619,16 @@ const SETTINGS_SCHEMA = {
         requiresRestart: false,
         default: false,
         description: 'Enable OpenAI logging.',
+        showInDialog: true,
+      },
+      openAILoggingDir: {
+        type: 'string',
+        label: 'OpenAI Logging Directory',
+        category: 'Model',
+        requiresRestart: false,
+        default: undefined as string | undefined,
+        description:
+          'Custom directory path for OpenAI API logs. If not specified, defaults to logs/openai in the current working directory.',
         showInDialog: true,
       },
       generationConfig: {
@@ -613,6 +672,22 @@ const SETTINGS_SCHEMA = {
             parentKey: 'generationConfig',
             childKey: 'disableCacheControl',
             showInDialog: true,
+          },
+          schemaCompliance: {
+            type: 'enum',
+            label: 'Tool Schema Compliance',
+            category: 'Generation Configuration',
+            requiresRestart: false,
+            default: 'auto',
+            description:
+              'The compliance mode for tool schemas sent to the model. Use "openapi_30" for strict OpenAPI 3.0 compatibility (e.g., for Gemini).',
+            parentKey: 'generationConfig',
+            childKey: 'schemaCompliance',
+            showInDialog: true,
+            options: [
+              { value: 'auto', label: 'Auto (Default)' },
+              { value: 'openapi_30', label: 'OpenAPI 3.0 Strict' },
+            ],
           },
         },
       },
@@ -824,14 +899,20 @@ const SETTINGS_SCHEMA = {
         mergeStrategy: MergeStrategy.UNION,
       },
       approvalMode: {
-        type: 'string',
-        label: 'Default Approval Mode',
+        type: 'enum',
+        label: 'Approval Mode',
         category: 'Tools',
         requiresRestart: false,
-        default: 'default',
+        default: ApprovalMode.DEFAULT,
         description:
-          'Default approval mode for tool usage. Valid values: plan, default, auto-edit, yolo.',
+          'Approval mode for tool usage. Controls how tools are approved before execution.',
         showInDialog: true,
+        options: [
+          { value: ApprovalMode.PLAN, label: 'Plan' },
+          { value: ApprovalMode.DEFAULT, label: 'Default' },
+          { value: ApprovalMode.AUTO_EDIT, label: 'Auto Edit' },
+          { value: ApprovalMode.YOLO, label: 'YOLO' },
+        ],
       },
       discoveryCommand: {
         type: 'string',
@@ -859,6 +940,16 @@ const SETTINGS_SCHEMA = {
         default: true,
         description:
           'Use ripgrep for file content search instead of the fallback implementation. Provides faster search performance.',
+        showInDialog: true,
+      },
+      useBuiltinRipgrep: {
+        type: 'boolean',
+        label: 'Use Builtin Ripgrep',
+        category: 'Tools',
+        requiresRestart: false,
+        default: true,
+        description:
+          'Use the bundled ripgrep binary. When set to false, the system-level "rg" command will be used instead. This setting is only effective when useRipgrep is true.',
         showInDialog: true,
       },
       enableToolOutputTruncation: {
@@ -1005,6 +1096,24 @@ const SETTINGS_SCHEMA = {
             description: 'Whether to use an external authentication flow.',
             showInDialog: false,
           },
+          apiKey: {
+            type: 'string',
+            label: 'API Key',
+            category: 'Security',
+            requiresRestart: true,
+            default: undefined as string | undefined,
+            description: 'API key for OpenAI compatible authentication.',
+            showInDialog: false,
+          },
+          baseUrl: {
+            type: 'string',
+            label: 'Base URL',
+            category: 'Security',
+            requiresRestart: true,
+            default: undefined as string | undefined,
+            description: 'Base URL for OpenAI compatible API.',
+            showInDialog: false,
+          },
         },
       },
     },
@@ -1058,15 +1167,34 @@ const SETTINGS_SCHEMA = {
       },
       tavilyApiKey: {
         type: 'string',
-        label: 'Tavily API Key',
+        label: 'Tavily API Key (Deprecated)',
         category: 'Advanced',
         requiresRestart: false,
         default: undefined as string | undefined,
         description:
-          'The API key for the Tavily API. Required to enable the web_search tool functionality.',
+          '⚠️ DEPRECATED: Please use webSearch.provider configuration instead. Legacy API key for the Tavily API.',
         showInDialog: false,
       },
     },
+  },
+
+  webSearch: {
+    type: 'object',
+    label: 'Web Search',
+    category: 'Advanced',
+    requiresRestart: true,
+    default: undefined as
+      | {
+          provider: Array<{
+            type: 'tavily' | 'google' | 'dashscope';
+            apiKey?: string;
+            searchEngineId?: string;
+          }>;
+          default: string;
+        }
+      | undefined,
+    description: 'Configuration for web search providers.',
+    showInDialog: false,
   },
 
   experimental: {

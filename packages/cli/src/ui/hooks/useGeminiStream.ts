@@ -26,7 +26,6 @@ import {
   GitService,
   UnauthorizedError,
   UserPromptEvent,
-  DEFAULT_GEMINI_FLASH_MODEL,
   logConversationFinishedEvent,
   ConversationFinishedEvent,
   ApprovalMode,
@@ -70,32 +69,6 @@ enum StreamProcessingStatus {
   Completed,
   UserCancelled,
   Error,
-}
-
-async function* bufferGeminiEvents(
-  stream: AsyncIterable<GeminiEvent>,
-): AsyncGenerator<GeminiEvent> {
-  let bufferedContent = '';
-  for await (const event of stream) {
-    if (event.type === ServerGeminiEventType.Content) {
-      bufferedContent += event.value;
-      continue;
-    }
-    if (bufferedContent) {
-      yield {
-        type: ServerGeminiEventType.Content,
-        value: bufferedContent,
-      } as GeminiEvent;
-      bufferedContent = '';
-    }
-    yield event;
-  }
-  if (bufferedContent) {
-    yield {
-      type: ServerGeminiEventType.Content,
-      value: bufferedContent,
-    } as GeminiEvent;
-  }
 }
 
 const EDIT_TOOL_NAMES = new Set(['replace', 'write_file']);
@@ -150,9 +123,13 @@ export const useGeminiStream = (
   const [pendingHistoryItem, pendingHistoryItemRef, setPendingHistoryItem] =
     useStateAndRef<HistoryItemWithoutId | null>(null);
   const processedMemoryToolsRef = useRef<Set<string>>(new Set());
-  const { startNewPrompt, getPromptCount } = useSessionStats();
+  const {
+    startNewPrompt,
+    getPromptCount,
+    stats: sessionStates,
+  } = useSessionStats();
   const storage = config.storage;
-  const logger = useLogger(storage);
+  const logger = useLogger(storage, sessionStates.sessionId);
   const gitService = useMemo(() => {
     if (!config.getProjectRoot()) {
       return;
@@ -519,6 +496,61 @@ export const useGeminiStream = (
     [addItem, pendingHistoryItemRef, setPendingHistoryItem],
   );
 
+  const mergeThought = useCallback(
+    (incoming: ThoughtSummary) => {
+      setThought((prev) => {
+        if (!prev) {
+          return incoming;
+        }
+        const subject = incoming.subject || prev.subject;
+        const description = `${prev.description ?? ''}${incoming.description ?? ''}`;
+        return { subject, description };
+      });
+    },
+    [setThought],
+  );
+
+  const handleThoughtEvent = useCallback(
+    (
+      eventValue: ThoughtSummary,
+      currentThoughtBuffer: string,
+      userMessageTimestamp: number,
+    ): string => {
+      if (turnCancelledRef.current) {
+        return '';
+      }
+
+      // Extract the description text from the thought summary
+      const thoughtText = eventValue.description ?? '';
+      if (!thoughtText) {
+        return currentThoughtBuffer;
+      }
+
+      const newThoughtBuffer = currentThoughtBuffer + thoughtText;
+
+      // If we're not already showing a thought, start a new one
+      if (pendingHistoryItemRef.current?.type !== 'gemini_thought') {
+        // If there's a pending non-thought item, finalize it first
+        if (pendingHistoryItemRef.current) {
+          addItem(pendingHistoryItemRef.current, userMessageTimestamp);
+        }
+        setPendingHistoryItem({ type: 'gemini_thought', text: '' });
+      }
+
+      // Update the existing thought message with accumulated content
+      setPendingHistoryItem({
+        type: 'gemini_thought',
+        text: newThoughtBuffer,
+      });
+
+      // Also update the thought state for the loading indicator
+      mergeThought(eventValue);
+
+      return newThoughtBuffer;
+    },
+    [addItem, pendingHistoryItemRef, setPendingHistoryItem, mergeThought],
+  );
+
   const handleUserCancelledEvent = useCallback(
     (userMessageTimestamp: number) => {
       if (turnCancelledRef.current) {
@@ -567,9 +599,6 @@ export const useGeminiStream = (
           text: parseAndFormatApiError(
             eventValue.error,
             config.getContentGeneratorConfig()?.authType,
-            undefined,
-            config.getModel(),
-            DEFAULT_GEMINI_FLASH_MODEL,
           ),
         },
         userMessageTimestamp,
@@ -621,6 +650,9 @@ export const useGeminiStream = (
           'Response stopped due to image safety violations.',
         [FinishReason.UNEXPECTED_TOOL_CALL]:
           'Response stopped due to unexpected tool call.',
+        [FinishReason.IMAGE_PROHIBITED_CONTENT]:
+          'Response stopped due to image prohibited content.',
+        [FinishReason.NO_IMAGE]: 'Response stopped due to no image.',
       };
 
       const message = finishReasonMessages[finishReason];
@@ -732,11 +764,22 @@ export const useGeminiStream = (
       signal: AbortSignal,
     ): Promise<StreamProcessingStatus> => {
       let geminiMessageBuffer = '';
+      let thoughtBuffer = '';
       const toolCallRequests: ToolCallRequestInfo[] = [];
       for await (const event of stream) {
         switch (event.type) {
           case ServerGeminiEventType.Thought:
-            setThought(event.value);
+            // If the thought has a subject, it's a discrete status update rather than
+            // a streamed textual thought, so we update the thought state directly.
+            if (event.value.subject) {
+              setThought(event.value);
+            } else {
+              thoughtBuffer = handleThoughtEvent(
+                event.value,
+                thoughtBuffer,
+                userMessageTimestamp,
+              );
+            }
             break;
           case ServerGeminiEventType.Content:
             geminiMessageBuffer = handleContentEvent(
@@ -798,6 +841,7 @@ export const useGeminiStream = (
     },
     [
       handleContentEvent,
+      handleThoughtEvent,
       handleUserCancelledEvent,
       handleErrorEvent,
       scheduleToolCalls,
@@ -806,6 +850,7 @@ export const useGeminiStream = (
       handleMaxSessionTurnsEvent,
       handleSessionTokenLimitExceededEvent,
       handleCitationEvent,
+      setThought,
     ],
   );
 
@@ -875,41 +920,36 @@ export const useGeminiStream = (
         const finalQueryToSend = queryToSend;
 
         if (!options?.isContinuation) {
+          // trigger new prompt event for session stats in CLI
+          startNewPrompt();
+
+          // log user prompt event for telemetry, only text prompts for now
           if (typeof queryToSend === 'string') {
-            // logging the text prompts only for now
-            const promptText = queryToSend;
             logUserPrompt(
               config,
               new UserPromptEvent(
-                promptText.length,
+                queryToSend.length,
                 prompt_id,
                 config.getContentGeneratorConfig()?.authType,
-                promptText,
+                queryToSend,
               ),
             );
           }
-          startNewPrompt();
-          setThought(null); // Reset thought when starting a new prompt
+
+          // Reset thought when starting a new prompt
+          setThought(null);
         }
 
         setIsResponding(true);
         setInitError(null);
 
         try {
-          const shouldStream = config.shouldStreamResponses();
-          const stream = shouldStream
-            ? geminiClient.sendMessageStream(
-                finalQueryToSend,
-                abortSignal,
-                prompt_id!,
-              )
-            : bufferGeminiEvents(
-                geminiClient.sendMessageSync(
-                  finalQueryToSend,
-                  abortSignal,
-                  prompt_id!,
-                ),
-              );
+          const stream = geminiClient.sendMessageStream(
+            finalQueryToSend,
+            abortSignal,
+            prompt_id!,
+            options,
+          );
           const processingStatus = await processGeminiStreamEvents(
             stream,
             userMessageTimestamp,
@@ -953,9 +993,6 @@ export const useGeminiStream = (
                 text: parseAndFormatApiError(
                   getErrorMessage(error) || 'Unknown error',
                   config.getContentGeneratorConfig()?.authType,
-                  undefined,
-                  config.getModel(),
-                  DEFAULT_GEMINI_FLASH_MODEL,
                 ),
               },
               userMessageTimestamp,

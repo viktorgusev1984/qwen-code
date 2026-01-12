@@ -103,6 +103,16 @@ export type HistoryItemGeminiContent = HistoryItemBase & {
   text: string;
 };
 
+export type HistoryItemGeminiThought = HistoryItemBase & {
+  type: 'gemini_thought';
+  text: string;
+};
+
+export type HistoryItemGeminiThoughtContent = HistoryItemBase & {
+  type: 'gemini_thought_content';
+  text: string;
+};
+
 export type HistoryItemInfo = HistoryItemBase & {
   type: 'info';
   text: string;
@@ -120,13 +130,22 @@ export type HistoryItemWarning = HistoryItemBase & {
 
 export type HistoryItemAbout = HistoryItemBase & {
   type: 'about';
-  cliVersion: string;
-  osVersion: string;
-  sandboxEnv: string;
-  modelVersion: string;
-  selectedAuthType: string;
-  gcpProject: string;
-  ideClient: string;
+  systemInfo: {
+    cliVersion: string;
+    osPlatform: string;
+    osArch: string;
+    osRelease: string;
+    nodeVersion: string;
+    npmVersion: string;
+    sandboxEnv: string;
+    modelVersion: string;
+    selectedAuthType: string;
+    ideClient: string;
+    sessionId: string;
+    memoryUsage: string;
+    baseUrl?: string;
+    gitCommit?: string;
+  };
 };
 
 export type HistoryItemHelp = HistoryItemBase & {
@@ -149,11 +168,6 @@ export type HistoryItemToolStats = HistoryItemBase & {
 
 export type HistoryItemQuit = HistoryItemBase & {
   type: 'quit';
-  duration: string;
-};
-
-export type HistoryItemQuitConfirmation = HistoryItemBase & {
-  type: 'quit_confirmation';
   duration: string;
 };
 
@@ -237,6 +251,8 @@ export type HistoryItemWithoutId =
   | HistoryItemUserShell
   | HistoryItemGemini
   | HistoryItemGeminiContent
+  | HistoryItemGeminiThought
+  | HistoryItemGeminiThoughtContent
   | HistoryItemInfo
   | HistoryItemError
   | HistoryItemWarning
@@ -247,7 +263,6 @@ export type HistoryItemWithoutId =
   | HistoryItemModelStats
   | HistoryItemToolStats
   | HistoryItemQuit
-  | HistoryItemQuitConfirmation
   | HistoryItemCompression
   | HistoryItemSummary
   | HistoryItemCompression
@@ -269,7 +284,6 @@ export enum MessageType {
   MODEL_STATS = 'model_stats',
   TOOL_STATS = 'tool_stats',
   QUIT = 'quit',
-  QUIT_CONFIRMATION = 'quit_confirmation',
   GEMINI = 'gemini',
   COMPRESSION = 'compression',
   SUMMARY = 'summary',
@@ -288,13 +302,22 @@ export type Message =
   | {
       type: MessageType.ABOUT;
       timestamp: Date;
-      cliVersion: string;
-      osVersion: string;
-      sandboxEnv: string;
-      modelVersion: string;
-      selectedAuthType: string;
-      gcpProject: string;
-      ideClient: string;
+      systemInfo: {
+        cliVersion: string;
+        osPlatform: string;
+        osArch: string;
+        osRelease: string;
+        nodeVersion: string;
+        npmVersion: string;
+        sandboxEnv: string;
+        modelVersion: string;
+        selectedAuthType: string;
+        ideClient: string;
+        sessionId: string;
+        memoryUsage: string;
+        baseUrl?: string;
+        gitCommit?: string;
+      };
       content?: string; // Optional content, not really used for ABOUT
     }
   | {
@@ -320,12 +343,6 @@ export type Message =
     }
   | {
       type: MessageType.QUIT;
-      timestamp: Date;
-      duration: string;
-      content?: string;
-    }
-  | {
-      type: MessageType.QUIT_CONFIRMATION;
       timestamp: Date;
       duration: string;
       content?: string;
@@ -385,8 +402,4 @@ export interface ConfirmationRequest {
 
 export interface LoopDetectionConfirmationRequest {
   onComplete: (result: { userSelection: 'disable' | 'keep' }) => void;
-}
-
-export interface QuitConfirmationRequest {
-  onConfirm: (shouldQuit: boolean, action?: string) => void;
 }

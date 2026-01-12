@@ -12,7 +12,6 @@ export * from './output/json-formatter.js';
 // Export Core Logic
 export * from './core/client.js';
 export * from './core/contentGenerator.js';
-export * from './core/loggingContentGenerator.js';
 export * from './core/geminiChat.js';
 export * from './core/logger.js';
 export * from './core/prompts.js';
@@ -24,11 +23,7 @@ export * from './core/nonInteractiveToolExecutor.js';
 
 export * from './fallback/types.js';
 
-export * from './code_assist/codeAssist.js';
-export * from './code_assist/oauth2.js';
 export * from './qwen/qwenOAuth2.js';
-export * from './code_assist/server.js';
-export * from './code_assist/types.js';
 
 // Export utilities
 export * from './utils/paths.js';
@@ -48,6 +43,7 @@ export * from './utils/systemEncoding.js';
 export * from './utils/textUtils.js';
 export * from './utils/formatters.js';
 export * from './utils/generateContentResponseUtilities.js';
+export * from './utils/ripgrepUtils.js';
 export * from './utils/filesearch/fileSearch.js';
 export * from './utils/errorParsing.js';
 export * from './utils/workspaceContext.js';
@@ -62,6 +58,7 @@ export * from './utils/thoughtUtils.js';
 export * from './services/fileDiscoveryService.js';
 export * from './services/gitService.js';
 export * from './services/chatRecordingService.js';
+export * from './services/sessionService.js';
 export * from './services/fileSystemService.js';
 
 // Export IDE specific logic
@@ -97,10 +94,15 @@ export * from './tools/write-file.js';
 export * from './tools/web-fetch.js';
 export * from './tools/memoryTool.js';
 export * from './tools/shell.js';
-export * from './tools/web-search.js';
+export * from './tools/web-search/index.js';
 export * from './tools/read-many-files.js';
 export * from './tools/mcp-client.js';
+export * from './tools/mcp-client-manager.js';
 export * from './tools/mcp-tool.js';
+export * from './tools/sdk-control-client-transport.js';
+export * from './tools/task.js';
+export * from './tools/todoWrite.js';
+export * from './tools/exitPlanMode.js';
 
 // MCP OAuth
 export { MCPOAuthProvider } from './mcp/oauth-provider.js';
@@ -118,7 +120,6 @@ export { OAuthUtils } from './mcp/oauth-utils.js';
 
 // Export telemetry functions
 export * from './telemetry/index.js';
-export { sessionId } from './utils/session.js';
 export * from './utils/browser.js';
 // OpenAI Logging Utilities
 export { OpenAILogger, openaiLogger } from './utils/openaiLogger.js';
